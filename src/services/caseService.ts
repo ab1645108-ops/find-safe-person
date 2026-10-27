@@ -2,7 +2,7 @@ import { MissingPerson, FoundConfirmationRecord, ReporterNotificationDelivery, S
 import { INITIAL_MISSING_PERSONS } from '../data/mockPersons';
 import { getAuthHeaders } from './authService';
 
-const STORAGE_KEY = 'findsafe_missing_cases_store_v2';
+const STORAGE_KEY = 'findsafe_missing_cases_store_v3';
 
 export function getLocalCases(): MissingPerson[] {
   try {

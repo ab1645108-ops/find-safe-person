@@ -3,7 +3,6 @@ import { GoogleGenAI } from "@google/genai";
 import {
   UserRole,
   CurrentUser,
-  AgeProgressionRecord,
   SystemAlert,
   DuplicateCaseFlag,
   AuditLogEntry,
@@ -11,11 +10,11 @@ import {
   FoundConfirmationRecord,
   ReporterNotificationDelivery,
   SubjectCondition,
-  ReunionStatus
+  ReunionStatus,
+  SightingLead
 } from "../src/types";
 import {
   SYSTEM_USERS,
-  INITIAL_AGE_PROGRESSIONS,
   INITIAL_SYSTEM_ALERTS,
   INITIAL_DUPLICATE_FLAGS,
 } from "../src/data/featureMockData";
@@ -40,7 +39,6 @@ export function sanitizeCaseForClient(caseObj: MissingPerson): MissingPerson {
 let serverCases: MissingPerson[] = db.getAllCases({ includeDeleted: true });
 const rawAlerts = db.getAlerts().length > 0 ? db.getAlerts() : [...INITIAL_SYSTEM_ALERTS];
 let alerts: SystemAlert[] = Array.from(new Map(rawAlerts.map(a => [a.id, a])).values());
-let ageProgressions: AgeProgressionRecord[] = [...INITIAL_AGE_PROGRESSIONS];
 let duplicateFlags: DuplicateCaseFlag[] = [...INITIAL_DUPLICATE_FLAGS];
 
 // Haversine formula to compute great-circle distance in meters between two lat/lng points
@@ -121,15 +119,32 @@ export function requireRole(allowedRoles: UserRole[]) {
       actorName = authUser.name;
       (req as any).user = sanitizeUser(authUser);
     } else {
-      // Fallback to legacy headers for seamless backward compatibility
+      // Privileged roles (ADMIN, INVESTIGATOR) strictly require verified cryptographic Bearer tokens
+      const requiresPrivilege = allowedRoles.some((r) => r === 'ADMIN' || r === 'INVESTIGATOR');
+      if (requiresPrivilege) {
+        logAudit(
+          { id: "usr_guest", name: "Unauthenticated Request", role: "CITIZEN" },
+          "UNAUTHORIZED_ACCESS",
+          req.baseUrl + req.path,
+          undefined,
+          "FORBIDDEN",
+          `Access to ${req.method} ${req.originalUrl} blocked: Privileged roles require a verified Bearer session token.`,
+          req
+        );
+        return res.status(401).json({
+          error: "Unauthorized: Please log in with authorized credentials to access this resource.",
+          code: "UNAUTHORIZED",
+        });
+      }
+
+      // Fallback for non-privileged public/civilian requests only
       const roleHeader = (req.headers["x-user-role"] as string)?.toUpperCase() as UserRole;
-      if (roleHeader && ['PUBLIC_USER', 'CITIZEN', 'INVESTIGATOR', 'ADMIN'].includes(roleHeader)) {
-        userRole = roleHeader === 'CITIZEN' ? 'PUBLIC_USER' : roleHeader;
-        actorName = (req.headers["x-user-name"] as string) || "Anonymous User";
+      if (roleHeader === 'PUBLIC_USER' || roleHeader === 'CITIZEN') {
+        userRole = 'PUBLIC_USER';
+        actorName = (req.headers["x-user-name"] as string) || "Public User";
         actorId = (req.headers["x-user-id"] as string) || "usr_guest";
         (req as any).user = { id: actorId, name: actorName, role: userRole };
       } else {
-        // Not authenticated
         return res.status(401).json({
           error: "Unauthorized: Please log in to access this resource.",
           code: "UNAUTHORIZED",
@@ -360,6 +375,7 @@ export function setupFeaturesRouter(getGeminiClient: () => GoogleGenAI | null): 
       const actorId = authUser?.id || (req.headers['x-user-id'] as string) || 'usr_actor';
       const actorName = authUser?.name || (req.headers['x-user-name'] as string) || 'User';
       const actorRole = authUser?.role || (req.headers['x-user-role'] as UserRole) || 'CITIZEN';
+      const actorEmail = authUser?.email || (req.headers['x-user-email'] as string) || '';
 
       const updateResult = db.updateCase(
         id,
@@ -368,6 +384,7 @@ export function setupFeaturesRouter(getGeminiClient: () => GoogleGenAI | null): 
           id: actorId,
           name: actorName,
           role: actorRole,
+          email: actorEmail,
         },
         req
       );
@@ -687,138 +704,7 @@ export function setupFeaturesRouter(getGeminiClient: () => GoogleGenAI | null): 
     }
   );
 
-  // ==========================================
-  // FEATURE 1: AI Age Progression
-  // ==========================================
-  router.get("/age-progression/:personId", (req: Request, res: Response) => {
-    const { personId } = req.params;
-    const records = ageProgressions.filter((r) => r.personId === personId);
-    res.json({ ageProgressions: records });
-  });
 
-  router.post(
-    "/age-progression",
-    requireRole(['INVESTIGATOR', 'ADMIN']),
-    async (req: Request, res: Response) => {
-      try {
-        const { personId, currentAge, targetAge, originalPhotoUrl, promptNotes, candidateProfile } = req.body;
-        const actor = (req as any).user;
-
-        if (!personId || !targetAge) {
-          return res.status(400).json({ error: "personId and targetAge are required." });
-        }
-
-        const yearsProgressed = Math.max(1, Number(targetAge) - Number(currentAge || 10));
-        const ai = getGeminiClient();
-
-        let morphologicalAnalysis = {
-          facialBoneChanges: `Natural cranial and mandibular development spanning ${yearsProgressed} years. Zygomatic arches broaden with adult nasal bridge elevation.`,
-          skinTextureChanges: `Slight maturation of facial dermis; retention of primary pigment and tone.`,
-          hairChanges: `Subtle hairline shift and density changes consistent with chronological maturity.`,
-          hereditaryFactors: `Morphology maintains primary hereditary symmetry and ocular spacing.`,
-          confidenceScore: 88,
-        };
-
-        let generatedDescription = promptNotes || "Chronological aging model based on craniofacial morphological standards.";
-
-        if (ai) {
-          try {
-            const prompt = `
-You are a Forensic Facial Anthropologist and Digital Age-Progression Specialist.
-Synthesize a scientific morphological age-progression report for a missing person.
-
-Subject Current Age: ${currentAge || 'Child'}
-Target Projected Age: ${targetAge}
-Years Elapsed: ${yearsProgressed}
-Original Case Profile: ${candidateProfile ? JSON.stringify(candidateProfile) : 'Standard missing case'}
-Special User Notes: ${promptNotes || 'None'}
-
-Return ONLY valid JSON:
-{
-  "facialBoneChanges": "detailed description of jaw, brow, cheekbone changes",
-  "skinTextureChanges": "detailed description of skin texture, lines, tone",
-  "hairChanges": "detailed description of hair style, color, density, hairline",
-  "hereditaryFactors": "key persistent identifiers that remain unchanged",
-  "confidenceScore": number between 75 and 95,
-  "summaryNotes": "1-2 sentence overview of anticipated appearance"
-}
-            `;
-
-            const rawText = await generateContentWithFallback(ai, {
-              contents: prompt,
-              config: { responseMimeType: "application/json" },
-            });
-
-            const parsed = JSON.parse(rawText?.replace(/```json/g, "").replace(/```/g, "").trim() || "{}");
-            if (parsed.facialBoneChanges) {
-              morphologicalAnalysis = {
-                facialBoneChanges: parsed.facialBoneChanges,
-                skinTextureChanges: parsed.skinTextureChanges,
-                hairChanges: parsed.hairChanges,
-                hereditaryFactors: parsed.hereditaryFactors,
-                confidenceScore: parsed.confidenceScore || 87,
-              };
-              generatedDescription = parsed.summaryNotes || generatedDescription;
-            }
-          } catch (aiErr) {
-            console.warn("AI Age progression fallback used:", aiErr);
-          }
-        }
-
-        // Generate age progression photo URL
-        const agedSamplesByBracket: { [key: string]: string } = {
-          teen_male: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=600&q=80',
-          adult_male: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=600&q=80',
-          senior_male: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=600&q=80',
-          teen_female: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=600&q=80',
-          adult_female: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80',
-          senior_female: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=600&q=80',
-        };
-
-        const targetNum = Number(targetAge);
-        let sampleKey = 'teen_male';
-        if (targetNum >= 65) sampleKey = 'senior_female';
-        else if (targetNum >= 25) sampleKey = 'adult_female';
-        else if (targetNum >= 14) sampleKey = 'teen_male';
-
-        const progressedPhotoUrl = agedSamplesByBracket[sampleKey] || originalPhotoUrl;
-
-        const newRecord: AgeProgressionRecord = {
-          id: `AP-${Date.now().toString().slice(-4)}`,
-          personId,
-          currentAge: Number(currentAge) || 10,
-          targetAge: Number(targetAge),
-          yearsProgressed,
-          originalPhotoUrl: originalPhotoUrl || 'https://images.unsplash.com/photo-1503454537195-1dcabb73ffb9?auto=format&fit=crop&w=600&q=80',
-          progressedPhotoUrl,
-          promptNotes: generatedDescription,
-          morphologicalAnalysis,
-          createdAt: new Date().toISOString(),
-          createdBy: `${actor.name} (${actor.role})`,
-        };
-
-        ageProgressions.unshift(newRecord);
-
-        logAudit(
-          actor,
-          "AGE_PROGRESSION_GENERATED",
-          "AgeProgressionRecord",
-          newRecord.id,
-          "SUCCESS",
-          `Generated ${yearsProgressed}-year age progression (Target age: ${targetAge}) for case ${personId}.`,
-          req
-        );
-
-        res.json({
-          success: true,
-          record: newRecord,
-        });
-      } catch (err: any) {
-        console.error("Error in /api/age-progression:", err);
-        res.status(500).json({ error: err.message || "Failed to generate age progression." });
-      }
-    }
-  );
 
   // ==========================================
   // Real-Time Alerts Hub
@@ -1171,6 +1057,87 @@ Return ONLY valid JSON:
       }
     }
   );
+
+  // -----------------------------------------------------------
+  // Sighting Leads & Found Person Reports Router
+  // -----------------------------------------------------------
+  router.get("/sightings", (req: Request, res: Response) => {
+    try {
+      const { personId, status } = req.query as { personId?: string; status?: string };
+      const sightings = db.getSightings({ personId, status });
+      res.json({ success: true, sightings });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load sightings." });
+    }
+  });
+
+  router.post("/sightings", (req: Request, res: Response) => {
+    try {
+      const authUser = extractAuthUser(req);
+      const actorId = authUser?.id || (req.headers['x-user-id'] as string) || 'usr_public';
+      const actorName = authUser?.name || (req.headers['x-user-name'] as string) || req.body?.reportedBy || 'Public Bystander';
+      const actorRole = authUser?.role || (req.headers['x-user-role'] as UserRole) || 'CITIZEN';
+
+      const sighting = db.saveSighting(
+        req.body as SightingLead,
+        { id: actorId, name: actorName, role: actorRole },
+        req
+      );
+
+      res.status(201).json({ success: true, sighting });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to submit sighting lead." });
+    }
+  });
+
+  router.put("/sightings/:id", (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const authUser = extractAuthUser(req);
+      const actorId = authUser?.id || (req.headers['x-user-id'] as string) || 'usr_investigator';
+      const actorName = authUser?.name || (req.headers['x-user-name'] as string) || 'Investigator';
+      const actorRole = authUser?.role || (req.headers['x-user-role'] as UserRole) || 'INVESTIGATOR';
+
+      const updated = db.updateSighting(
+        id,
+        req.body,
+        { id: actorId, name: actorName, role: actorRole },
+        req
+      );
+
+      if (!updated) {
+        return res.status(404).json({ error: "Sighting lead not found." });
+      }
+
+      res.json({ success: true, sighting: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to update sighting lead." });
+    }
+  });
+
+  router.delete("/sightings/:id", (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const authUser = extractAuthUser(req);
+      const actorId = authUser?.id || (req.headers['x-user-id'] as string) || 'usr_investigator';
+      const actorName = authUser?.name || (req.headers['x-user-name'] as string) || 'Investigator';
+      const actorRole = authUser?.role || (req.headers['x-user-role'] as UserRole) || 'INVESTIGATOR';
+
+      const success = db.deleteSighting(
+        id,
+        { id: actorId, name: actorName, role: actorRole },
+        req
+      );
+
+      if (!success) {
+        return res.status(404).json({ error: "Sighting lead not found." });
+      }
+
+      res.json({ success: true, id });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to delete sighting lead." });
+    }
+  });
 
   return router;
 }

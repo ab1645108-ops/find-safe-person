@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { AuditLogEntry, CurrentUser, UserRole } from '../types';
 import { 
   ShieldCheck, ShieldAlert, Lock, User, RefreshCw, 
-  Download, Filter, Search, CheckCircle2, XCircle, AlertTriangle 
+  Download, Filter, Search, CheckCircle2, XCircle, AlertTriangle,
+  Database, Server
 } from 'lucide-react';
+import { getAuthHeaders } from '../services/authService';
 
 interface SecurityAuditModalProps {
   isOpen: boolean;
@@ -21,6 +23,7 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [forbiddenMessage, setForbiddenMessage] = useState<string | null>(null);
+  const [dbStats, setDbStats] = useState<any>(null);
 
   const isAuthorized = currentUser.role === 'ADMIN';
 
@@ -34,26 +37,29 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
     setIsLoading(true);
     setForbiddenMessage(null);
     try {
-      const res = await fetch('/api/audit-logs', {
-        headers: {
-          'x-user-role': currentUser.role,
-          'x-user-name': currentUser.name,
-          'x-user-id': currentUser.id,
-        },
-      });
+      const [logsRes, dbRes] = await Promise.all([
+        fetch('/api/audit-logs', {
+          headers: getAuthHeaders(currentUser),
+        }),
+        fetch('/api/system/database-info', {
+          headers: getAuthHeaders(currentUser),
+        }),
+      ]);
 
-      if (res.status === 403) {
-        const err = await res.json();
+      if (logsRes.status === 403) {
+        const err = await logsRes.json();
         setForbiddenMessage(err.message || 'Access Forbidden (HTTP 403): Audit log inspection is restricted to System Administrators.');
-        return;
-      }
-
-      if (res.ok) {
-        const data = await res.json();
+      } else if (logsRes.ok) {
+        const data = await logsRes.json();
         setAuditLogs(data.auditLogs || []);
       }
+
+      if (dbRes.ok) {
+        const dbData = await dbRes.json();
+        setDbStats(dbData.stats);
+      }
     } catch (err) {
-      console.error('Failed to load audit logs:', err);
+      console.error('Failed to load audit logs / db stats:', err);
     } finally {
       setIsLoading(false);
     }
@@ -88,7 +94,7 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
   const rbacMatrix = [
     { capability: 'View Public Case Registry & Alerts', public: true, inv: true, admin: true },
     { capability: 'Submit Public Sighting Reports', public: true, inv: true, admin: true },
-    { capability: 'AI Age Progression Simulation', public: false, inv: true, admin: true },
+    { capability: 'Case Dossier Verification & Management', public: false, inv: true, admin: true },
     { capability: 'Duplicate Case Detection & Merging', public: false, inv: true, admin: true },
     { capability: 'Dispatch Emergency Broadcasts (WEA/Signage)', public: false, inv: false, admin: true },
     { capability: 'Inspect System Audit Logs & Forensics', public: false, inv: false, admin: true },
@@ -147,6 +153,54 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
           </div>
         </div>
 
+        {/* Persistent Relational Database Architecture */}
+        <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-white">
+              <Database className="w-4 h-4 text-cyan-400" />
+              <span className="text-xs font-bold uppercase tracking-wider">
+                Active Relational Database: SQLite 3 Engine
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800 font-mono">
+                node:sqlite (findsafe.db)
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400">
+              <span className="flex items-center gap-1 text-emerald-400">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                PRAGMA integrity_check: {dbStats?.integrity || 'ok'}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2 text-center text-xs">
+            <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+              <span className="text-[10px] text-slate-400 block font-mono">USERS</span>
+              <span className="text-base font-bold text-white font-mono">{dbStats?.tableCounts?.users ?? '—'}</span>
+            </div>
+            <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+              <span className="text-[10px] text-slate-400 block font-mono">CASES</span>
+              <span className="text-base font-bold text-white font-mono">{dbStats?.tableCounts?.cases ?? '—'}</span>
+            </div>
+            <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+              <span className="text-[10px] text-slate-400 block font-mono">REQUESTS</span>
+              <span className="text-base font-bold text-white font-mono">{dbStats?.tableCounts?.investigator_requests ?? '—'}</span>
+            </div>
+            <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+              <span className="text-[10px] text-slate-400 block font-mono">SIGHTINGS</span>
+              <span className="text-base font-bold text-white font-mono">{dbStats?.tableCounts?.sightings ?? '—'}</span>
+            </div>
+            <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+              <span className="text-[10px] text-slate-400 block font-mono">AUDIT TRAIL</span>
+              <span className="text-base font-bold text-emerald-400 font-mono">{dbStats?.tableCounts?.audit_logs ?? '—'}</span>
+            </div>
+            <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+              <span className="text-[10px] text-slate-400 block font-mono">RATE LIMITS</span>
+              <span className="text-base font-bold text-amber-400 font-mono">{dbStats?.tableCounts?.auth_rate_limits ?? 0}</span>
+            </div>
+          </div>
+        </div>
+
         {/* RBAC Capabilities Matrix Table */}
         <div className="space-y-2">
           <span className="text-xs font-bold text-white uppercase tracking-wider block">
@@ -190,7 +244,7 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
                 Security Audit Log Stream ({auditLogs.length} Events)
               </span>
               <p className="text-[11px] text-slate-400">
-                Every sensitive query, perimeter breach, age progression, and authorization block is permanently logged.
+                Every sensitive query, perimeter breach, case verification, and authorization block is permanently logged.
               </p>
             </div>
             {isAuthorized && (
@@ -304,6 +358,13 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
                         </tr>
                       );
                     })}
+                    {filteredLogs.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="p-8 text-center text-slate-400 font-sans">
+                          No audit entries found. Real-time actions, logins, and registrations will be logged here automatically.
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>

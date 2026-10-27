@@ -40,7 +40,7 @@ export function clearSession() {
 
 export function getAuthHeaders(userOverride?: CurrentUser | UserAccount): HeadersInit {
   const token = getStoredToken();
-  const user = userOverride || getStoredUser() || { id: 'usr_inv_01', name: 'Detective Sarah Jenkins', role: 'INVESTIGATOR' as UserRole, email: 's.jenkins@findsafe.ai' };
+  const user = userOverride || getStoredUser();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -66,11 +66,21 @@ export interface LoginResponse {
   code?: string;
   rejectionReason?: string;
   status?: string;
+  requiresAdmin2FA?: boolean;
+  pendingToken?: string;
+  destinationEmail?: string;
+  maskedEmail?: string;
+  expiresInSeconds?: number;
+  message?: string;
+  devVerificationHint?: string;
+  codeExpired?: boolean;
+  attemptsRemaining?: number;
 }
 
 export interface RegisterResponse {
   success: boolean;
   message?: string;
+  token?: string;
   user?: UserAccount;
   error?: string;
 }
@@ -92,12 +102,80 @@ export async function loginUser(email: string, password: string, expectedRole?: 
         status: data.status,
       };
     }
+    // If admin requires 2FA confirmation code
+    if (data.requiresAdmin2FA) {
+      return {
+        success: true,
+        requiresAdmin2FA: true,
+        pendingToken: data.pendingToken,
+        destinationEmail: data.destinationEmail,
+        maskedEmail: data.maskedEmail,
+        expiresInSeconds: data.expiresInSeconds,
+        devVerificationHint: data.devVerificationHint,
+        message: data.message,
+      };
+    }
     if (data.token && data.user) {
       setSession(data.token, data.user);
     }
     return { success: true, token: data.token, user: data.user };
   } catch (err: any) {
     return { success: false, error: err.message || 'Network error during authentication.' };
+  }
+}
+
+export async function verifyAdminConfirmationCode(pendingToken: string, code: string): Promise<LoginResponse> {
+  try {
+    const res = await fetch('/api/auth/admin/verify-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pendingToken, code }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return {
+        success: false,
+        error: data.error || 'Failed to verify confirmation code.',
+        codeExpired: data.codeExpired,
+        attemptsRemaining: data.attemptsRemaining,
+      };
+    }
+    if (data.token && data.user) {
+      setSession(data.token, data.user);
+    }
+    return { success: true, token: data.token, user: data.user };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Network error during verification.' };
+  }
+}
+
+export async function resendAdminConfirmationCode(pendingToken: string): Promise<{
+  success: boolean;
+  message?: string;
+  error?: string;
+  destinationEmail?: string;
+  maskedEmail?: string;
+  devVerificationHint?: string;
+}> {
+  try {
+    const res = await fetch('/api/auth/admin/resend-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pendingToken }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'Failed to resend confirmation code.' };
+    }
+    return {
+      success: true,
+      message: data.message,
+      destinationEmail: data.destinationEmail,
+      maskedEmail: data.maskedEmail,
+      devVerificationHint: data.devVerificationHint,
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Network error requesting new code.' };
   }
 }
 
@@ -167,9 +245,55 @@ export async function registerUser(
     if (!res.ok) {
       return { success: false, error: data.error || 'Registration failed.' };
     }
-    return { success: true, message: data.message, user: data.user };
+    if (data.token && data.user) {
+      setSession(data.token, data.user);
+    }
+    return { success: true, message: data.message, token: data.token, user: data.user };
   } catch (err: any) {
     return { success: false, error: err.message || 'Network error during registration.' };
+  }
+}
+
+export async function requestPasswordReset(email: string): Promise<{
+  success: boolean;
+  message?: string;
+  resetToken?: string;
+  error?: string;
+}> {
+  try {
+    const res = await fetch('/api/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email.trim().toLowerCase() }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'Failed to submit password recovery request.' };
+    }
+    return { success: true, message: data.message, resetToken: data.resetToken };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Network error requesting password reset.' };
+  }
+}
+
+export async function submitPasswordReset(
+  token: string,
+  newPassword: string,
+  confirmPassword?: string
+): Promise<{ success: boolean; message?: string; error?: string }> {
+  try {
+    const res = await fetch('/api/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: token.trim(), newPassword, confirmPassword }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'Failed to reset password.' };
+    }
+    return { success: true, message: data.message };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Network error submitting new password.' };
   }
 }
 
@@ -424,3 +548,40 @@ export async function adminRevokeInvestigatorAccess(
     return { success: false, error: err.message || 'Network error revoking investigator access.' };
   }
 }
+
+export async function adminDeleteInvestigatorRequest(
+  requestId: string
+): Promise<{ success: boolean; message?: string; error?: string }> {
+  try {
+    const res = await fetch(`/api/admin/investigator-requests/${requestId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'Failed to remove investigator request.' };
+    }
+    return { success: true, message: data.message };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Network error removing investigator request.' };
+  }
+}
+
+export async function adminDeleteUser(
+  userId: string
+): Promise<{ success: boolean; message?: string; error?: string }> {
+  try {
+    const res = await fetch(`/api/admin/users/${userId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'Failed to delete user account.' };
+    }
+    return { success: true, message: data.message };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Network error deleting user account.' };
+  }
+}
+

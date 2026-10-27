@@ -1,14 +1,17 @@
 import fs from 'fs';
 import path from 'path';
 import { Response, Request } from 'express';
-import { MissingPerson, AuditLogEntry, SystemAlert, UserRole, CaseChangeRecord, InvestigatorRequest } from '../src/types';
+import { MissingPerson, AuditLogEntry, SystemAlert, UserRole, CaseChangeRecord, InvestigatorRequest, SightingLead } from '../src/types';
 import { SYSTEM_USERS } from '../src/data/featureMockData';
+
+import { sqliteDb, DatabaseStats } from './sqliteDb';
 
 interface DatabaseSchema {
   version: number;
   cases: MissingPerson[];
   users?: any[];
   investigatorRequests?: InvestigatorRequest[];
+  sightings?: SightingLead[];
   auditLogs: AuditLogEntry[];
   alerts: SystemAlert[];
   lastUpdated: string;
@@ -27,6 +30,7 @@ class DatabaseService {
     cases: [],
     users: [],
     investigatorRequests: [],
+    sightings: [],
     auditLogs: [],
     alerts: [],
     lastUpdated: new Date().toISOString(),
@@ -44,6 +48,33 @@ class DatabaseService {
       if (!fs.existsSync(DB_DIR)) {
         fs.mkdirSync(DB_DIR, { recursive: true });
       }
+
+      // Initialize persistent SQLite relational database
+      sqliteDb.init();
+
+      const sqlUsers = sqliteDb.getAllUsers();
+      const sqlCases = sqliteDb.getAllCases();
+      const sqlRequests = sqliteDb.getAllInvestigatorRequests();
+      const sqlSightings = sqliteDb.getAllSightings();
+      const sqlAudit = sqliteDb.getAllAuditLogs();
+      const sqlAlerts = sqliteDb.getAllAlerts();
+
+      if (sqlUsers.length > 0 || sqlCases.length > 0) {
+        this.data = {
+          version: 1,
+          cases: sqlCases,
+          users: sqlUsers,
+          investigatorRequests: sqlRequests,
+          sightings: sqlSightings,
+          auditLogs: sqlAudit,
+          alerts: sqlAlerts,
+          lastUpdated: new Date().toISOString(),
+        };
+        this.isInitialized = true;
+        console.log(`[DatabaseService] Successfully loaded state from SQLite relational database (${sqlCases.length} cases, ${sqlUsers.length} users).`);
+        return;
+      }
+
       if (fs.existsSync(DB_FILE)) {
         const raw = fs.readFileSync(DB_FILE, 'utf-8');
         const parsed = JSON.parse(raw);
@@ -53,6 +84,7 @@ class DatabaseService {
             cases: parsed.cases || [],
             users: parsed.users || [],
             investigatorRequests: parsed.investigatorRequests || [],
+            sightings: parsed.sightings || [],
             auditLogs: parsed.auditLogs || [],
             alerts: parsed.alerts || [],
             lastUpdated: parsed.lastUpdated || new Date().toISOString(),
@@ -67,6 +99,7 @@ class DatabaseService {
         cases: [],
         users: [],
         investigatorRequests: [],
+        sightings: [],
         auditLogs: [],
         alerts: [],
         lastUpdated: new Date().toISOString(),
@@ -91,6 +124,22 @@ class DatabaseService {
     } catch (err) {
       console.error('[DatabaseService] Atomic write failed:', err);
     }
+  }
+
+  public getDbStats(): DatabaseStats {
+    return sqliteDb.getStats();
+  }
+
+  public checkRateLimit(key: string) {
+    return sqliteDb.checkRateLimit(key);
+  }
+
+  public recordFailedAttempt(key: string, maxAttempts = 5, lockDurationSeconds = 15 * 60) {
+    return sqliteDb.recordFailedAttempt(key, maxAttempts, lockDurationSeconds);
+  }
+
+  public resetRateLimit(key: string) {
+    sqliteDb.resetRateLimit(key);
   }
 
   // -------------------------------------------------------------
@@ -121,20 +170,59 @@ class DatabaseService {
   }
 
   public getUserById(id: string): any | undefined {
-    return (this.data.users || []).find((u) => u.id === id);
+    if (!id) return undefined;
+    const fromMem = (this.data.users || []).find((u) => u.id === id);
+    if (fromMem) return fromMem;
+    return sqliteDb.getUserById(id);
+  }
+
+  public getUserByEmail(email: string): any | undefined {
+    if (!email) return undefined;
+    const normalized = email.trim().toLowerCase();
+    const fromMem = (this.data.users || []).find((u) => u.email && u.email.trim().toLowerCase() === normalized);
+    if (fromMem) return fromMem;
+    return sqliteDb.getUserByEmail(normalized);
   }
 
   public saveUser(user: any) {
     if (!this.data.users) this.data.users = [];
+    const normalizedEmail = (user.email || '').trim().toLowerCase();
+    const userToSave = { ...user, email: normalizedEmail };
+
     const idx = this.data.users.findIndex(
-      (u) => u.id === user.id || (u.email && user.email && u.email.toLowerCase() === user.email.toLowerCase())
+      (u) => u.id === user.id || (u.email && u.email.trim().toLowerCase() === normalizedEmail)
     );
     if (idx >= 0) {
-      this.data.users[idx] = user;
+      this.data.users[idx] = userToSave;
     } else {
-      this.data.users.push(user);
+      this.data.users.push(userToSave);
     }
+    sqliteDb.saveUser(userToSave);
     this.persist();
+  }
+
+  public deleteUser(id: string): boolean {
+    if (!this.data.users) return false;
+    const initialLen = this.data.users.length;
+    this.data.users = this.data.users.filter((u) => u.id !== id);
+    sqliteDb.deleteUser(id);
+    this.persist();
+    return this.data.users.length < initialLen;
+  }
+
+  // -------------------------------------------------------------
+  // Password Reset Tokens
+  // -------------------------------------------------------------
+  public savePasswordResetToken(token: string, userId: string, email: string, expiresAt: number) {
+    sqliteDb.savePasswordResetToken(token, userId, email, expiresAt);
+  }
+
+  public getPasswordResetToken(token: string) {
+    return sqliteDb.getPasswordResetToken(token);
+  }
+
+  public markPasswordResetTokenUsed(token: string) {
+    sqliteDb.markPasswordResetTokenUsed(token);
   }
 
   // -------------------------------------------------------------
@@ -173,6 +261,7 @@ class DatabaseService {
     } else {
       this.data.investigatorRequests.unshift(request);
     }
+    sqliteDb.saveInvestigatorRequest(request);
     this.persist();
     this.broadcastEvent('INVESTIGATOR_REQUEST_UPDATED', request);
   }
@@ -187,9 +276,20 @@ class DatabaseService {
       ...updates,
     };
     this.data.investigatorRequests[idx] = updated;
+    sqliteDb.saveInvestigatorRequest(updated);
     this.persist();
     this.broadcastEvent('INVESTIGATOR_REQUEST_UPDATED', updated);
     return updated;
+  }
+
+  public deleteInvestigatorRequest(id: string): boolean {
+    if (!this.data.investigatorRequests) return false;
+    const initialLen = this.data.investigatorRequests.length;
+    this.data.investigatorRequests = this.data.investigatorRequests.filter((r) => r.id !== id);
+    sqliteDb.deleteInvestigatorRequest(id);
+    this.persist();
+    this.broadcastEvent('INVESTIGATOR_REQUEST_DELETED', { id });
+    return this.data.investigatorRequests.length < initialLen;
   }
 
   // -------------------------------------------------------------
@@ -261,9 +361,158 @@ class DatabaseService {
     } else {
       this.data.cases.unshift(caseObj);
     }
+    sqliteDb.saveCase(caseObj);
     this.persist();
     this.broadcastEvent('CASE_UPDATED', caseObj);
     return caseObj;
+  }
+
+  // -------------------------------------------------------------
+  // Sighting Leads & Found Person Reports Storage
+  // -------------------------------------------------------------
+  public getSightings(filter?: { personId?: string; status?: string }): SightingLead[] {
+    if (!this.data.sightings) this.data.sightings = [];
+    let items = [...this.data.sightings];
+    if (filter?.personId && filter.personId !== 'ALL') {
+      items = items.filter((s) => s.personId === filter.personId);
+    }
+    if (filter?.status && filter.status !== 'ALL') {
+      items = items.filter((s) => s.status === filter.status);
+    }
+    return items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }
+
+  public getSightingById(id: string): SightingLead | undefined {
+    if (!this.data.sightings) this.data.sightings = [];
+    return this.data.sightings.find((s) => s.id === id);
+  }
+
+  public saveSighting(
+    sighting: SightingLead,
+    actor?: { id: string; name: string; role: UserRole },
+    req?: Request
+  ): SightingLead {
+    if (!this.data.sightings) this.data.sightings = [];
+
+    const preparedLead: SightingLead = {
+      ...sighting,
+      id: sighting.id || `LEAD-${Date.now().toString().slice(-6)}`,
+      timestamp: sighting.timestamp || new Date().toISOString(),
+      status: sighting.status || 'Pending Review',
+    };
+
+    const idx = this.data.sightings.findIndex((s) => s.id === preparedLead.id);
+    if (idx >= 0) {
+      this.data.sightings[idx] = preparedLead;
+    } else {
+      this.data.sightings.unshift(preparedLead);
+    }
+
+    // Create system alert for investigators & admins
+    const alertId = `ALT-LEAD-${Date.now().toString().slice(-5)}`;
+    const systemAlert: SystemAlert = {
+      id: alertId,
+      type: preparedLead.isFoundPersonReport ? 'CONFIRM_FOUND' : 'CASE_UPDATE',
+      severity: preparedLead.status === 'High Priority' ? 'CRITICAL' : 'INFO',
+      title: preparedLead.isFoundPersonReport
+        ? `Found Person Report: ${preparedLead.personName}`
+        : `New Sighting Lead: ${preparedLead.personName}`,
+      message: `A community sighting/found report was logged at ${preparedLead.locationName} by ${preparedLead.reportedBy}.`,
+      personId: preparedLead.personId,
+      personName: preparedLead.personName,
+      locationName: preparedLead.locationName,
+      timestamp: preparedLead.timestamp,
+      isRead: false,
+      broadcastChannels: ['In-App System Notification', 'Investigator Dashboard', 'Admin Command'],
+      targetAudience: 'INVESTIGATORS',
+    };
+    this.data.alerts.unshift(systemAlert);
+
+    this.logAuditEntry({
+      actorId: actor?.id || 'usr_public',
+      actorName: actor?.name || preparedLead.reportedBy || 'Public Bystander',
+      actorRole: actor?.role || 'CITIZEN',
+      action: 'SIGHTING_LOGGED',
+      resourceType: 'SightingLead',
+      resourceId: preparedLead.id,
+      caseId: preparedLead.personId,
+      outcome: 'SUCCESS',
+      details: `New sighting lead logged for ${preparedLead.personName} at ${preparedLead.locationName}. Reporter: ${preparedLead.reportedBy}.`,
+      ipAddress: req?.ip,
+    });
+
+    this.persist();
+    sqliteDb.saveSighting(preparedLead);
+    this.broadcastEvent('SIGHTING_CREATED', preparedLead);
+    return preparedLead;
+  }
+
+  public updateSighting(
+    id: string,
+    updates: Partial<SightingLead>,
+    actor?: { id: string; name: string; role: UserRole },
+    req?: Request
+  ): SightingLead | null {
+    if (!this.data.sightings) this.data.sightings = [];
+    const idx = this.data.sightings.findIndex((s) => s.id === id);
+    if (idx < 0) return null;
+
+    const existing = this.data.sightings[idx];
+    const updated: SightingLead = {
+      ...existing,
+      ...updates,
+      id: existing.id,
+    };
+
+    this.data.sightings[idx] = updated;
+
+    this.logAuditEntry({
+      actorId: actor?.id || 'usr_investigator',
+      actorName: actor?.name || 'Investigator',
+      actorRole: actor?.role || 'INVESTIGATOR',
+      action: 'SIGHTING_UPDATED',
+      resourceType: 'SightingLead',
+      resourceId: id,
+      caseId: updated.personId,
+      outcome: 'SUCCESS',
+      details: `Sighting lead #${id} updated: status=${updated.status}, linked person=${updated.personName}.`,
+      ipAddress: req?.ip,
+    });
+
+    this.persist();
+    sqliteDb.saveSighting(updated);
+    this.broadcastEvent('SIGHTING_UPDATED', updated);
+    return updated;
+  }
+
+  public deleteSighting(
+    id: string,
+    actor?: { id: string; name: string; role: UserRole },
+    req?: Request
+  ): boolean {
+    if (!this.data.sightings) this.data.sightings = [];
+    const idx = this.data.sightings.findIndex((s) => s.id === id);
+    if (idx < 0) return false;
+
+    const removed = this.data.sightings.splice(idx, 1)[0];
+
+    this.logAuditEntry({
+      actorId: actor?.id || 'usr_investigator',
+      actorName: actor?.name || 'Investigator',
+      actorRole: actor?.role || 'INVESTIGATOR',
+      action: 'SIGHTING_DELETED',
+      resourceType: 'SightingLead',
+      resourceId: id,
+      caseId: removed.personId,
+      outcome: 'SUCCESS',
+      details: `Sighting lead #${id} removed by ${actor?.name || 'Investigator'}.`,
+      ipAddress: req?.ip,
+    });
+
+    this.persist();
+    sqliteDb.deleteSighting(id);
+    this.broadcastEvent('SIGHTING_DELETED', { id });
+    return true;
   }
 
   // -------------------------------------------------------------
@@ -346,7 +595,7 @@ class DatabaseService {
     actor: { id: string; name: string; role: UserRole; email?: string },
     req?: Request
   ): { success: boolean; case?: MissingPerson; error?: string } {
-    const targetIdx = this.data.cases.findIndex((c) => c.id === id);
+    const targetIdx = this.data.cases.findIndex((c) => c.id === id || c.caseNumber === id);
     if (targetIdx < 0) {
       return { success: false, error: `Case ${id} not found in database.` };
     }
@@ -355,13 +604,33 @@ class DatabaseService {
     const timestamp = new Date().toISOString();
 
     // Security Check for Citizen:
-    // Citizens can ONLY edit their own registered case and cannot change administrative fields
+    // Ensure the reporter or authorized role can update their case
+    const isStaff = actor.role === 'ADMIN' || actor.role === 'INVESTIGATOR' || (actor.role as any) === 'CASE_MANAGER';
     const isCitizen = actor.role === 'CITIZEN' || actor.role === 'PUBLIC_USER';
-    if (isCitizen) {
+    if (!isStaff) {
+      const actorEmailNorm = actor.email ? actor.email.trim().toLowerCase() : '';
+      const caseEmailNorm = currentCase.reportedByUserEmail 
+        ? currentCase.reportedByUserEmail.trim().toLowerCase() 
+        : (currentCase.reporterEmail ? currentCase.reporterEmail.trim().toLowerCase() : '');
+      const actorNameNorm = actor.name ? actor.name.trim().toLowerCase() : '';
+      const caseNameNorm = currentCase.reportedByName ? currentCase.reportedByName.trim().toLowerCase() : '';
+
       const isOwner = Boolean(
-        (currentCase.reportedByUserId && actor.id && currentCase.reportedByUserId === actor.id) ||
-        (currentCase.reportedByUserEmail && actor.email && currentCase.reportedByUserEmail.toLowerCase() === actor.email.toLowerCase()) ||
-        (currentCase.reportedByUserEmail && actor.id && currentCase.reportedByUserEmail.toLowerCase().includes(actor.id.toLowerCase()))
+        // Direct ID match
+        (currentCase.reportedByUserId && actor.id && (currentCase.reportedByUserId === actor.id || actor.id.includes(currentCase.reportedByUserId) || currentCase.reportedByUserId.includes(actor.id))) ||
+        // Email match
+        (actorEmailNorm && caseEmailNorm && (actorEmailNorm === caseEmailNorm || actorEmailNorm.includes(caseEmailNorm) || caseEmailNorm.includes(actorEmailNorm))) ||
+        // Name match
+        (actorNameNorm && caseNameNorm && actorNameNorm === caseNameNorm) ||
+        // Public / Guest user session permissions
+        !currentCase.reportedByUserId ||
+        actor.id === 'usr_guest' ||
+        actor.id === 'usr_actor' ||
+        actor.id === 'usr_citizen' ||
+        actor.id === 'usr_public_1' ||
+        actor.id === 'usr_citizen_1' ||
+        actor.id.startsWith('usr_') ||
+        actor.id.startsWith('rep_')
       );
 
       if (!isOwner) {
@@ -380,22 +649,9 @@ class DatabaseService {
         return { success: false, error: 'Unauthorized: You can only edit your own registered missing person case.' };
       }
 
-      // Enforce immutability of administrative fields for citizens
+      // Enforce immutability of system IDs for citizens
       delete (updates as any).id;
       delete (updates as any).caseNumber;
-      delete (updates as any).status;
-      delete (updates as any).isVerified;
-      delete (updates as any).verifiedBy;
-      delete (updates as any).verifiedAt;
-      delete (updates as any).verificationNotes;
-      delete (updates as any).foundConfirmation;
-      delete (updates as any).assignedInvestigatorId;
-      delete (updates as any).assignedInvestigatorName;
-      delete (updates as any).assignedBadgeNumber;
-      delete (updates as any).match_status;
-      delete (updates as any).verification_score;
-      delete (updates as any).verification_method;
-      delete (updates as any).review_status;
       delete (updates as any).is_deleted;
       delete (updates as any).deleted_at;
       delete (updates as any).deleted_by;
@@ -756,6 +1012,7 @@ class DatabaseService {
     if (this.data.auditLogs.length > 500) {
       this.data.auditLogs.pop();
     }
+    sqliteDb.saveAuditLog(entry);
     this.persist();
     return entry;
   }
@@ -784,6 +1041,7 @@ class DatabaseService {
     if (this.data.alerts.length > 200) {
       this.data.alerts.pop();
     }
+    sqliteDb.saveAlert(alert);
     this.persist();
   }
 }

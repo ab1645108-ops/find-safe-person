@@ -283,31 +283,6 @@ export interface CaseChangeRecord {
   summary: string;
 }
 
-// FEATURE 1: AI Age Progression
-export interface MorphologicalAnalysis {
-  facialBoneChanges: string;
-  skinTextureChanges: string;
-  hairChanges: string;
-  hereditaryFactors: string;
-  confidenceScore: number;
-}
-
-export interface AgeProgressionRecord {
-  id: string;
-  personId: string;
-  personName?: string;
-  currentAge: number;
-  targetAge: number;
-  yearsProgressed: number;
-  originalPhotoUrl: string;
-  progressedPhotoUrl: string;
-  agedPhotoUrl?: string;
-  promptNotes?: string;
-  morphologicalAnalysis: MorphologicalAnalysis;
-  createdAt: string;
-  createdBy: string;
-}
-
 // Real-Time Alerts & Notification Hub
 export type SystemAlertType = 
   | 'AMBER_ALERT'
@@ -315,7 +290,8 @@ export type SystemAlertType =
   | 'HIGH_CONFIDENCE_SIGHTING'
   | 'CASE_UPDATE'
   | 'PERSON_FOUND_RESOLVED'
-  | 'REPORTER_FOUND_NOTIFICATION';
+  | 'REPORTER_FOUND_NOTIFICATION'
+  | 'CONFIRM_FOUND';
 
 export interface SystemAlert {
   id: string;

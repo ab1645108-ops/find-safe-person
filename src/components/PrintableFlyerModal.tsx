@@ -1,19 +1,15 @@
 import React from 'react';
 import { MissingPerson } from '../types';
-import { Printer, X, AlertTriangle, ShieldCheck, Sparkles } from 'lucide-react';
+import { Printer, X, AlertTriangle, ShieldCheck } from 'lucide-react';
 
 interface PrintableFlyerModalProps {
   person: MissingPerson | null;
   onClose: () => void;
-  agedPhotoUrl?: string;
-  agedTargetAge?: number;
 }
 
 export const PrintableFlyerModal: React.FC<PrintableFlyerModalProps> = ({
   person,
   onClose,
-  agedPhotoUrl,
-  agedTargetAge,
 }) => {
   if (!person) return null;
 
@@ -46,12 +42,6 @@ export const PrintableFlyerModal: React.FC<PrintableFlyerModalProps> = ({
             <span className="text-[11px] font-mono text-rose-400">
               Case #{person.caseNumber}
             </span>
-            {agedPhotoUrl && (
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 flex items-center gap-1">
-                <Sparkles className="w-3 h-3 text-purple-400" />
-                <span>Forensic Age Progression (Age {agedTargetAge})</span>
-              </span>
-            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -88,8 +78,8 @@ export const PrintableFlyerModal: React.FC<PrintableFlyerModalProps> = ({
 
           {/* Main Photo & Primary Identification */}
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-6 items-center">
-            {/* Subject Photo(s) */}
-            <div className={`sm:col-span-5 ${agedPhotoUrl ? 'grid grid-cols-2 gap-2' : ''}`}>
+            {/* Subject Photo */}
+            <div className="sm:col-span-5">
               <div className="aspect-[4/5] rounded-xl overflow-hidden border-2 border-slate-800 bg-slate-100 shadow-md relative">
                 <img
                   src={person.photoUrl}
@@ -97,21 +87,9 @@ export const PrintableFlyerModal: React.FC<PrintableFlyerModalProps> = ({
                   className="w-full h-full object-cover"
                 />
                 <div className="absolute bottom-0 inset-x-0 bg-black/70 text-white text-[9px] font-bold text-center py-0.5">
-                  AGE {person.age} (ORIGINAL)
+                  AGE {person.age}
                 </div>
               </div>
-              {agedPhotoUrl && (
-                <div className="aspect-[4/5] rounded-xl overflow-hidden border-2 border-purple-600 bg-slate-100 shadow-md relative">
-                  <img
-                    src={agedPhotoUrl}
-                    alt="Age Progressed Projection"
-                    className="w-full h-full object-cover"
-                  />
-                  <div className="absolute bottom-0 inset-x-0 bg-purple-700 text-white text-[9px] font-bold text-center py-0.5">
-                    PROJECTED AGE {agedTargetAge}
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* Vital Statistics Table */}
@@ -129,9 +107,6 @@ export const PrintableFlyerModal: React.FC<PrintableFlyerModalProps> = ({
                 <div>
                   <span className="text-slate-500 font-semibold block">AGE AT DISAPPEARANCE:</span>
                   <span className="text-base font-bold text-slate-900">{person.age} Years Old</span>
-                  {agedTargetAge && (
-                    <span className="text-xs text-purple-700 font-bold block">(Est. Today: {agedTargetAge}y)</span>
-                  )}
                 </div>
                 <div>
                   <span className="text-slate-500 font-semibold block">GENDER:</span>

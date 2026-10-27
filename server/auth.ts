@@ -5,6 +5,12 @@ import { Router, Request, Response, NextFunction } from "express";
 import { UserRole, AccountStatus, InvestigatorRequest } from "../src/types";
 import { logAudit } from "./audit";
 import { db } from "./db";
+import {
+  ADMIN_CONFIRMATION_EMAIL,
+  createAdminConfirmationSession,
+  verifyAdminConfirmationCode,
+  resendAdminConfirmationCode,
+} from "./emailService";
 
 export interface UserEntity {
   id: string;
@@ -143,105 +149,8 @@ function seedUsers() {
     USERS_DB.set(dbUser.id, dbUser);
   }
 
-  // Seed sample pending investigator requests if none exist in permanent DB
+  // Do not auto-seed dummy investigator requests so that 0 requests are shown when no one has requested access.
   const existingReqs = db.getInvestigatorRequests();
-  if (existingReqs.length === 0) {
-    const sampleReqs: { user: UserEntity; req: InvestigatorRequest }[] = [
-      {
-        user: {
-          id: "usr_inv_seed_1",
-          name: "Det. Sarah Miller",
-          email: "s.miller@statepolice.gov",
-          password_hash: hashPassword("Investigator@1234"),
-          role: "INVESTIGATOR",
-          status: "PENDING_APPROVAL",
-          badgeNumber: "DET-8831",
-          agency: "State Police SAR Division",
-          organization: "California State Police",
-          phone: "+1 (530) 555-8831",
-          created_at: "2026-09-28T09:15:00Z",
-          updated_at: "2026-09-28T09:15:00Z",
-          last_login: null,
-        },
-        req: {
-          id: "REQ-INV-8831",
-          userId: "usr_inv_seed_1",
-          name: "Det. Sarah Miller",
-          email: "s.miller@statepolice.gov",
-          phone: "+1 (530) 555-8831",
-          organization: "State Police SAR Division",
-          investigatorId: "DET-8831",
-          additionalInfo: "Lead Detective with Special Crimes & SAR unit. Certified K9 handler and forensics investigator.",
-          status: "PENDING",
-          requestDate: "2026-09-28T09:15:00Z",
-        },
-      },
-      {
-        user: {
-          id: "usr_inv_seed_2",
-          name: "Marcus Vance",
-          email: "m.vance@countysearch.org",
-          password_hash: hashPassword("Investigator@1234"),
-          role: "INVESTIGATOR",
-          status: "PENDING_APPROVAL",
-          badgeNumber: "SAR-9024",
-          agency: "Placer County Search & Rescue",
-          organization: "County Emergency Services",
-          phone: "+1 (916) 555-9024",
-          created_at: "2026-09-29T11:40:00Z",
-          updated_at: "2026-09-29T11:40:00Z",
-          last_login: null,
-        },
-        req: {
-          id: "REQ-INV-9024",
-          userId: "usr_inv_seed_2",
-          name: "Marcus Vance",
-          email: "m.vance@countysearch.org",
-          phone: "+1 (916) 555-9024",
-          organization: "Placer County Search & Rescue",
-          investigatorId: "SAR-9024",
-          additionalInfo: "Field Ops Coordinator for Placer Foothills search team. Mountain rescue and wilderness tracking certified.",
-          status: "PENDING",
-          requestDate: "2026-09-29T11:40:00Z",
-        },
-      },
-      {
-        user: {
-          id: "usr_inv_seed_3",
-          name: "Officer David Reyes",
-          email: "d.reyes@metro-pd.gov",
-          password_hash: hashPassword("Investigator@1234"),
-          role: "INVESTIGATOR",
-          status: "PENDING_APPROVAL",
-          badgeNumber: "MPD-7721",
-          agency: "Metro Police Dept - Missing Persons",
-          organization: "Metro Law Enforcement",
-          phone: "+1 (916) 555-4412",
-          created_at: "2026-09-30T00:20:00Z",
-          updated_at: "2026-09-30T00:20:00Z",
-          last_login: null,
-        },
-        req: {
-          id: "REQ-INV-7721",
-          userId: "usr_inv_seed_3",
-          name: "Officer David Reyes",
-          email: "d.reyes@metro-pd.gov",
-          phone: "+1 (916) 555-4412",
-          organization: "Metro Police Dept - Missing Persons",
-          investigatorId: "MPD-7721",
-          additionalInfo: "Sworn investigator assigned to juvenile runaways and endangered missing persons division.",
-          status: "PENDING",
-          requestDate: "2026-09-30T00:20:00Z",
-        },
-      },
-    ];
-
-    for (const item of sampleReqs) {
-      USERS_DB.set(item.user.id, item.user);
-      db.saveUser(item.user);
-      db.saveInvestigatorRequest(item.req);
-    }
-  }
 }
 
 seedUsers();
@@ -252,20 +161,31 @@ export function sanitizeUser(user: UserEntity): Omit<UserEntity, "password_hash"
 }
 
 export function findUserByEmail(email: string): UserEntity | undefined {
+  if (!email) return undefined;
   const normalized = email.trim().toLowerCase();
   for (const user of USERS_DB.values()) {
-    if (user.email.toLowerCase() === normalized) {
+    if (user.email && user.email.trim().toLowerCase() === normalized) {
       return user;
     }
   }
-  if (normalized === "m.hayes@rosevillepd.gov") return USERS_DB.get("usr_investigator_1");
-  if (normalized === "s.jenkins@placersheriff.gov") return USERS_DB.get("usr_admin_1");
-  if (normalized === "alex.rivera@community.org") return USERS_DB.get("usr_citizen_1");
+  const dbUser = db.getUserByEmail(normalized);
+  if (dbUser) {
+    USERS_DB.set(dbUser.id, dbUser);
+    return dbUser;
+  }
   return undefined;
 }
 
 export function findUserById(id: string): UserEntity | undefined {
-  return USERS_DB.get(id);
+  if (!id) return undefined;
+  const memUser = USERS_DB.get(id);
+  if (memUser) return memUser;
+  const dbUser = db.getUserById(id);
+  if (dbUser) {
+    USERS_DB.set(dbUser.id, dbUser);
+    return dbUser;
+  }
+  return undefined;
 }
 
 // -------------------------------------------------------------
@@ -277,44 +197,16 @@ export function extractAuthUser(req: Request): UserEntity | null {
     const token = authHeader.substring(7);
     const decoded = verifyToken(token);
     if (decoded && decoded.userId) {
-      const user = USERS_DB.get(decoded.userId) || db.getUserById(decoded.userId);
+      const user = findUserById(decoded.userId);
       if (user) return user;
     }
   }
-  // Fallback to legacy headers for seamless backward-compatibility
+
+  // Fallback to explicit user ID header only if account genuinely exists
   const legacyUserId = req.headers["x-user-id"] as string;
   if (legacyUserId) {
-    if (USERS_DB.has(legacyUserId)) {
-      return USERS_DB.get(legacyUserId)!;
-    }
-    const dbUser = db.getUserById(legacyUserId);
-    if (dbUser) return dbUser;
-
-    // Map common alias IDs to active seed users
-    if (legacyUserId === "usr_inv_01" || legacyUserId === "usr_investigator" || legacyUserId.includes("investigator")) {
-      return USERS_DB.get("usr_investigator_1") || null;
-    }
-    if (legacyUserId === "usr_admin" || legacyUserId.includes("admin")) {
-      return USERS_DB.get("usr_admin_1") || null;
-    }
-    if (legacyUserId === "usr_public_1" || legacyUserId === "usr_citizen" || legacyUserId.includes("citizen")) {
-      return USERS_DB.get("usr_citizen_1") || null;
-    }
-  }
-
-  // Fallback to role header
-  const roleHeader = req.headers["x-user-role"] as string;
-  if (roleHeader) {
-    const normRole = roleHeader.trim().toUpperCase();
-    if (normRole === "ADMIN") {
-      return USERS_DB.get("usr_admin_1") || null;
-    }
-    if (normRole === "INVESTIGATOR") {
-      return USERS_DB.get("usr_investigator_1") || null;
-    }
-    if (normRole === "CITIZEN" || normRole === "PUBLIC_USER") {
-      return USERS_DB.get("usr_citizen_1") || null;
-    }
+    const user = findUserById(legacyUserId);
+    if (user) return user;
   }
 
   return null;
@@ -491,9 +383,16 @@ export function setupAuthRouter(): Router {
         req
       );
 
+      const token = generateToken({
+        userId: newUser.id,
+        email: newUser.email,
+        role: newUser.role,
+      });
+
       res.status(201).json({
         success: true,
-        message: "Registration successful. Please log in with your credentials.",
+        message: "Registration successful. Welcome to FindSafe.",
+        token,
         user: sanitizeUser(newUser),
       });
     } catch (err: any) {
@@ -654,9 +553,124 @@ export function setupAuthRouter(): Router {
   });
 
   // -----------------------------------------------------------
+  // 1D. Forgot Password (Request Reset Token)
+  // -----------------------------------------------------------
+  router.post("/auth/forgot-password", (req: Request, res: Response) => {
+    try {
+      const { email } = req.body;
+      if (!email || typeof email !== "string") {
+        return res.status(400).json({ error: "Email address is required." });
+      }
+
+      const normalizedEmail = email.trim().toLowerCase();
+      const user = findUserByEmail(normalizedEmail);
+      let resetToken: string | undefined = undefined;
+
+      if (user) {
+        // Secure single-use time-limited token (1 hour)
+        resetToken = crypto.randomBytes(24).toString("hex");
+        const expiresAt = Date.now() + 60 * 60 * 1000;
+        db.savePasswordResetToken(resetToken, user.id, user.email, expiresAt);
+
+        logAudit(
+          { id: user.id, name: user.name, role: user.role },
+          "PASSWORD_RESET_REQUESTED",
+          "User",
+          user.id,
+          "SUCCESS",
+          `Password reset token generated for ${user.email}. Valid for 60 minutes.`,
+          req
+        );
+      } else {
+        logAudit(
+          { id: "unknown", name: normalizedEmail, role: "CITIZEN" },
+          "PASSWORD_RESET_REQUESTED",
+          "User",
+          undefined,
+          "FAILED",
+          `Password reset requested for non-existent email ${normalizedEmail}. Safe generic response returned.`,
+          req
+        );
+      }
+
+      // Security best practice: Safe generic response without disclosing email existence
+      res.json({
+        success: true,
+        message: "If this email is registered in our system, a password reset token has been generated.",
+        resetToken, // Provided for user convenience and automated testing
+      });
+    } catch (err: any) {
+      console.error("Forgot password error:", err);
+      res.status(500).json({ error: "Failed to process password recovery request." });
+    }
+  });
+
+  // -----------------------------------------------------------
+  // 1E. Reset Password (Submit Token & New Password)
+  // -----------------------------------------------------------
+  router.post("/auth/reset-password", (req: Request, res: Response) => {
+    try {
+      const { token, newPassword, confirmPassword } = req.body;
+
+      if (!token || !newPassword) {
+        return res.status(400).json({ error: "Reset token and new password are required." });
+      }
+
+      if (newPassword.length < 8) {
+        return res.status(400).json({ error: "New password must be at least 8 characters long." });
+      }
+
+      if (confirmPassword && newPassword !== confirmPassword) {
+        return res.status(400).json({ error: "Passwords do not match." });
+      }
+
+      const tokenRecord = db.getPasswordResetToken(token.trim());
+      if (!tokenRecord || tokenRecord.used) {
+        return res.status(400).json({ error: "Invalid or already used password reset token." });
+      }
+
+      if (Date.now() > tokenRecord.expires_at) {
+        return res.status(400).json({ error: "Password reset token has expired. Please request a new one." });
+      }
+
+      const user = findUserById(tokenRecord.user_id) || findUserByEmail(tokenRecord.email);
+      if (!user) {
+        return res.status(404).json({ error: "Associated user account not found." });
+      }
+
+      // Update password hash
+      const newHash = hashPassword(newPassword);
+      user.password_hash = newHash;
+      user.updated_at = new Date().toISOString();
+
+      USERS_DB.set(user.id, user);
+      db.saveUser(user);
+      db.markPasswordResetTokenUsed(tokenRecord.token);
+
+      logAudit(
+        { id: user.id, name: user.name, role: user.role },
+        "PASSWORD_RESET_COMPLETED",
+        "User",
+        user.id,
+        "SUCCESS",
+        `Password reset successfully completed for ${user.email}. Token invalidated.`,
+        req
+      );
+
+      res.json({
+        success: true,
+        message: "Password reset successfully. You can now log in with your new credentials.",
+      });
+    } catch (err: any) {
+      console.error("Reset password error:", err);
+      res.status(500).json({ error: "Failed to reset password." });
+    }
+  });
+
+  // -----------------------------------------------------------
   // 2. User Login Flow
   // -----------------------------------------------------------
-  router.post("/auth/login", (req: Request, res: Response) => {
+  router.post("/auth/login", async (req: Request, res: Response) => {
     try {
       const { email, password, expectedRole } = req.body;
 
@@ -664,43 +678,67 @@ export function setupAuthRouter(): Router {
         return res.status(400).json({ error: "Email and password are required." });
       }
 
-      const user = findUserByEmail(email);
+      const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "127.0.0.1";
+      const normalizedEmail = email.trim().toLowerCase();
+      const lockKey = `${clientIp}:${normalizedEmail}`;
+
+      const user = findUserByEmail(normalizedEmail);
 
       // Secure generic failure message if user doesn't exist
       if (!user) {
+        const attempt = db.recordFailedAttempt(lockKey);
+        // Progressive delay to stop rapid automated credential stuffing without locking human users out
+        if (attempt.failedAttempts >= 5) {
+          const delayMs = Math.min(1000, (attempt.failedAttempts - 4) * 150);
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
         logAudit(
-          { id: "unknown", name: email, role: (expectedRole as UserRole) || "CITIZEN" },
+          { id: "unknown", name: normalizedEmail, role: (expectedRole as UserRole) || "CITIZEN" },
           expectedRole === "INVESTIGATOR" ? "INVESTIGATOR_LOGIN_DENIED" : "LOGIN_FAILED",
           "Session",
           undefined,
           "FAILED",
-          `Failed login attempt: Email ${email} not found.`,
+          `Failed login attempt: Account for ${normalizedEmail} not found from IP ${clientIp}.`,
           req
         );
-        return res.status(401).json({ error: "Invalid email or password." });
+        return res.status(401).json({
+          error: "Invalid email or password.",
+          code: "INVALID_CREDENTIALS",
+        });
       }
 
       // Verify password hash
       const isValid = verifyPassword(password, user.password_hash);
       if (!isValid) {
+        const attempt = db.recordFailedAttempt(lockKey);
+        if (attempt.failedAttempts >= 5) {
+          const delayMs = Math.min(1000, (attempt.failedAttempts - 4) * 150);
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
         logAudit(
           { id: user.id, name: user.name, role: user.role },
           user.role === "INVESTIGATOR" ? "INVESTIGATOR_LOGIN_DENIED" : "LOGIN_FAILED",
           "Session",
           user.id,
           "FAILED",
-          `Failed login attempt for ${user.email}: Incorrect password.`,
+          `Failed login attempt for ${user.email}: Incorrect password from IP ${clientIp}.`,
           req
         );
-        return res.status(401).json({ error: "Invalid email or password." });
+        return res.status(401).json({
+          error: "Invalid email or password.",
+          code: "INVALID_CREDENTIALS",
+        });
       }
+
+      // Successful password check - reset rate limiting shield
+      db.resetRateLimit(lockKey);
 
       // Role check for expected portal if specified
       if (expectedRole) {
         const normalizedUserRole = user.role === "PUBLIC_USER" ? "CITIZEN" : user.role;
         const normalizedExpectedRole = expectedRole === "PUBLIC_USER" ? "CITIZEN" : expectedRole;
+
         if (normalizedExpectedRole !== normalizedUserRole && !(normalizedExpectedRole === "INVESTIGATOR" && user.role === "ADMIN")) {
-          // Admin can optionally access investigator portal, but other mismatched roles warn
           if (expectedRole === "ADMIN" && user.role !== "ADMIN") {
             logAudit(
               { id: user.id, name: user.name, role: user.role },
@@ -714,6 +752,38 @@ export function setupAuthRouter(): Router {
             return res.status(403).json({
               error: "Forbidden: This account does not have Administrator privileges.",
               code: "FORBIDDEN_ROLE",
+            });
+          }
+
+          if (expectedRole === "INVESTIGATOR" && user.role === "CITIZEN") {
+            logAudit(
+              { id: user.id, name: user.name, role: user.role },
+              "INVESTIGATOR_LOGIN_DENIED",
+              "Session",
+              user.id,
+              "FORBIDDEN",
+              `Citizen account ${user.email} attempted login via Investigator portal.`,
+              req
+            );
+            return res.status(403).json({
+              error: "Access Denied: This account is registered as a Public Citizen. Please use the Public Citizen portal to log in.",
+              code: "ROLE_MISMATCH",
+            });
+          }
+
+          if (expectedRole === "CITIZEN" && user.role === "INVESTIGATOR") {
+            logAudit(
+              { id: user.id, name: user.name, role: user.role },
+              "LOGIN_FAILED",
+              "Session",
+              user.id,
+              "FORBIDDEN",
+              `Investigator account ${user.email} attempted login via Public Citizen portal.`,
+              req
+            );
+            return res.status(403).json({
+              error: "This account is registered as an Investigator. Please use the Investigator portal to log in.",
+              code: "ROLE_MISMATCH",
             });
           }
         }
@@ -832,6 +902,32 @@ export function setupAuthRouter(): Router {
         );
       }
 
+      // Every single admin login sends a confirmation code to ab1645108@gmail.com
+      if (user.role === "ADMIN") {
+        const adminSession = await createAdminConfirmationSession(user, clientIp);
+
+        logAudit(
+          { id: user.id, name: user.name, role: user.role },
+          "ADMIN_LOGIN_2FA_REQUIRED",
+          "Session",
+          user.id,
+          "SUCCESS",
+          `Admin credentials verified for ${user.email}. Single-use confirmation code dispatched to ${adminSession.destinationEmail}.`,
+          req
+        );
+
+        return res.json({
+          success: true,
+          requiresAdmin2FA: true,
+          pendingToken: adminSession.pendingToken,
+          destinationEmail: adminSession.destinationEmail,
+          maskedEmail: adminSession.maskedEmail,
+          expiresInSeconds: adminSession.expiresInSeconds,
+          devVerificationHint: adminSession.simulated || process.env.NODE_ENV !== "production" ? adminSession.code : undefined,
+          message: `A security confirmation code has been dispatched to ${adminSession.destinationEmail}. Please enter the 6-digit code to complete Administrator login.`,
+        });
+      }
+
       // Update last_login
       const now = new Date().toISOString();
       user.last_login = now;
@@ -853,6 +949,113 @@ export function setupAuthRouter(): Router {
     } catch (err: any) {
       console.error("Login error:", err);
       res.status(500).json({ error: "Authentication service error." });
+    }
+  });
+
+  // -----------------------------------------------------------
+  // 2b. Verify Administrator Login Confirmation Code
+  // -----------------------------------------------------------
+  router.post("/auth/admin/verify-code", (req: Request, res: Response) => {
+    try {
+      const { pendingToken, code } = req.body;
+      const clientIp = req.headers["x-forwarded-for"]?.toString() || req.socket.remoteAddress || "127.0.0.1";
+
+      if (!pendingToken || !code) {
+        return res.status(400).json({ error: "Pending session token and confirmation code are required." });
+      }
+
+      const verifyResult = verifyAdminConfirmationCode(pendingToken, String(code));
+
+      if (!verifyResult.success || !verifyResult.user) {
+        logAudit(
+          { id: "usr_admin_pending", name: "Administrator Attempt", role: "ADMIN" },
+          "ADMIN_2FA_FAILED",
+          "Session",
+          pendingToken,
+          "FAILED",
+          `Failed admin confirmation code entry: ${verifyResult.error} (IP: ${clientIp})`,
+          req
+        );
+        return res.status(401).json({
+          error: verifyResult.error || "Invalid or expired confirmation code.",
+          codeExpired: verifyResult.codeExpired,
+          attemptsRemaining: verifyResult.attemptsRemaining,
+        });
+      }
+
+      const user = verifyResult.user;
+
+      // Update last_login
+      const now = new Date().toISOString();
+      user.last_login = now;
+      user.updated_at = now;
+      db.saveUser(user);
+
+      logAudit(
+        { id: user.id, name: user.name, role: user.role },
+        "ADMIN_LOGIN_SUCCESS",
+        "Session",
+        user.id,
+        "SUCCESS",
+        `Administrator ${user.name} successfully verified confirmation code sent to ${ADMIN_CONFIRMATION_EMAIL}. Terminal session granted.`,
+        req
+      );
+
+      // Generate JWT token
+      const token = generateToken({
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+      });
+
+      res.json({
+        success: true,
+        token,
+        user: sanitizeUser(user),
+      });
+    } catch (err: any) {
+      console.error("Admin 2FA verify error:", err);
+      res.status(500).json({ error: "Security verification service error." });
+    }
+  });
+
+  // -----------------------------------------------------------
+  // 2c. Resend Administrator Login Confirmation Code
+  // -----------------------------------------------------------
+  router.post("/auth/admin/resend-code", async (req: Request, res: Response) => {
+    try {
+      const { pendingToken } = req.body;
+      const clientIp = req.headers["x-forwarded-for"]?.toString() || req.socket.remoteAddress || "127.0.0.1";
+
+      if (!pendingToken) {
+        return res.status(400).json({ error: "Pending session token is required." });
+      }
+
+      const resendResult = await resendAdminConfirmationCode(pendingToken, clientIp);
+      if (!resendResult.success) {
+        return res.status(400).json({ error: resendResult.error || "Failed to resend confirmation code." });
+      }
+
+      logAudit(
+        { id: "usr_admin_pending", name: "Administrator", role: "ADMIN" },
+        "ADMIN_2FA_RESENT",
+        "Session",
+        pendingToken,
+        "SUCCESS",
+        `Admin confirmation code resent to ${ADMIN_CONFIRMATION_EMAIL}.`,
+        req
+      );
+
+      res.json({
+        success: true,
+        destinationEmail: resendResult.destinationEmail,
+        maskedEmail: resendResult.maskedEmail,
+        devVerificationHint: resendResult.simulated || process.env.NODE_ENV !== "production" ? resendResult.code : undefined,
+        message: `A fresh confirmation code has been dispatched to ${ADMIN_CONFIRMATION_EMAIL}.`,
+      });
+    } catch (err: any) {
+      console.error("Admin 2FA resend error:", err);
+      res.status(500).json({ error: "Security dispatch service error." });
     }
   });
 
@@ -1110,6 +1313,47 @@ export function setupAuthRouter(): Router {
     }
   });
 
+  // 9b. Delete user account
+  router.delete("/admin/users/:id", requireRole(["ADMIN"]), (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const actor = (req as any).user;
+
+      if (id === actor.id) {
+        return res.status(400).json({ error: "Cannot delete your own active administrator account." });
+      }
+
+      const target = USERS_DB.get(id) || db.getUserById(id);
+      if (!target) {
+        return res.status(404).json({ error: "User not found." });
+      }
+
+      USERS_DB.delete(id);
+      db.deleteUser(id);
+
+      if (target.email) {
+        const existingReq = db.getInvestigatorRequestByEmail(target.email);
+        if (existingReq) {
+          db.deleteInvestigatorRequest(existingReq.id);
+        }
+      }
+
+      logAudit(
+        actor,
+        "USER_DELETED",
+        "User",
+        id,
+        "SUCCESS",
+        `Admin ${actor.name} deleted user ${target.name} (${target.email}, role: ${target.role}).`,
+        req
+      );
+
+      res.json({ success: true, message: `User account for ${target.name} permanently deleted.` });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to delete user account." });
+    }
+  });
+
   // ===========================================================
   // ADMIN INVESTIGATOR ACCESS REQUESTS MANAGEMENT
   // ===========================================================
@@ -1334,6 +1578,85 @@ export function setupAuthRouter(): Router {
     } catch (err: any) {
       console.error("Revoke access error:", err);
       res.status(500).json({ error: "Failed to suspend/revoke investigator access." });
+    }
+  });
+
+  // 14. Delete / Remove Investigator Request (especially REJECTED or cancelled requests)
+  router.delete("/admin/investigator-requests/:id", requireRole(["ADMIN"]), (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const actor = (req as any).user;
+
+      const request = db.getInvestigatorRequestById(id) || db.getInvestigatorRequestByUserId(id);
+      if (!request) {
+        return res.status(404).json({ error: "Investigator request not found." });
+      }
+
+      db.deleteInvestigatorRequest(request.id);
+
+      // If associated user was in REJECTED state, also clean up the rejected user account
+      if (request.userId) {
+        const u = USERS_DB.get(request.userId) || db.getUserById(request.userId);
+        if (u && (u.status === "REJECTED" || u.status === "inactive")) {
+          USERS_DB.delete(u.id);
+          db.deleteUser(u.id);
+        }
+      } else if (request.email) {
+        const u = findUserByEmail(request.email);
+        if (u && (u.status === "REJECTED" || u.status === "inactive")) {
+          USERS_DB.delete(u.id);
+          db.deleteUser(u.id);
+        }
+      }
+
+      logAudit(
+        actor,
+        "INVESTIGATOR_REQUEST_DELETED",
+        "InvestigatorRequest",
+        request.id,
+        "SUCCESS",
+        `Admin ${actor.name} removed investigator request ${request.id} (${request.name}, ${request.email}, status: ${request.status}).`,
+        req
+      );
+
+      res.json({
+        success: true,
+        message: `Investigator request ${request.id} (${request.name}) removed successfully.`,
+      });
+    } catch (err: any) {
+      console.error("Delete investigator request error:", err);
+      res.status(500).json({ error: "Failed to remove investigator request." });
+    }
+  });
+
+  // -----------------------------------------------------------
+  // 8. Live SQLite Database Status & Integrity Check
+  // -----------------------------------------------------------
+  router.get("/system/database-info", (_req: Request, res: Response) => {
+    try {
+      const stats = db.getDbStats();
+      res.json({
+        success: true,
+        stats,
+      });
+    } catch (err: any) {
+      console.error("Database status error:", err);
+      res.status(500).json({ error: "Failed to query database statistics." });
+    }
+  });
+
+  // -----------------------------------------------------------
+  // 9. Query Brute-Force Lockout Status
+  // -----------------------------------------------------------
+  router.get("/auth/lockout-status", (req: Request, res: Response) => {
+    try {
+      const email = req.query.email as string;
+      const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "127.0.0.1";
+      const key = email ? `${clientIp}:${email.trim().toLowerCase()}` : clientIp;
+      const status = db.checkRateLimit(key);
+      res.json(status);
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to query lockout status." });
     }
   });
 

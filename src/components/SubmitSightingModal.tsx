@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { MissingPerson, SightingLead, CurrentUser } from '../types';
 import { Camera, Upload, Eye, X, CheckCircle2, AlertTriangle, Sparkles, RefreshCw, Eraser, Check, Video, VideoOff, Phone, Mail } from 'lucide-react';
+import { useLanguage } from '../context/LanguageContext';
 
 interface SubmitSightingModalProps {
   isOpen: boolean;
@@ -19,6 +20,7 @@ export const SubmitSightingModal: React.FC<SubmitSightingModalProps> = ({
   currentUser,
   preselectedPersonId,
 }) => {
+  const { dict } = useLanguage();
   const [selectedPersonId, setSelectedPersonId] = useState<string>(preselectedPersonId || '');
   const [locationName, setLocationName] = useState('');
   const [notes, setNotes] = useState('');
@@ -26,6 +28,7 @@ export const SubmitSightingModal: React.FC<SubmitSightingModalProps> = ({
   const [reporterName, setReporterName] = useState(currentUser?.role === 'PUBLIC_USER' ? '' : (currentUser?.name || ''));
   const [contactNumber, setContactNumber] = useState('');
   const [contactEmail, setContactEmail] = useState(currentUser?.email || '');
+  const [isFoundPersonReport, setIsFoundPersonReport] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [aiPreview, setAiPreview] = useState<any | null>(null);
   const [clearFeedback, setClearFeedback] = useState(false);
@@ -137,6 +140,7 @@ export const SubmitSightingModal: React.FC<SubmitSightingModalProps> = ({
     setContactNumber('');
     setContactEmail('');
     setReporterName(currentUser?.role === 'PUBLIC_USER' ? '' : (currentUser?.name || ''));
+    setIsFoundPersonReport(false);
     setAiPreview(null);
     setClearFeedback(true);
     stopCamera();
@@ -196,17 +200,19 @@ export const SubmitSightingModal: React.FC<SubmitSightingModalProps> = ({
     const newLead: SightingLead = {
       id: `LEAD-${Math.floor(1000 + Math.random() * 9000)}`,
       personId: matched?.id,
-      personName: matched?.name || 'Unspecified Case',
+      personName: matched?.name || (isFoundPersonReport ? 'Found Unidentified Subject' : 'Unspecified Case'),
       timestamp: new Date().toISOString(),
       locationName: locationName || 'Reported Location',
       lat: matched?.lastSeenLocation.lat || 38.75,
       lng: matched?.lastSeenLocation.lng || -121.28,
-      notes: notes || 'Bystander community sighting reported.',
+      notes: notes || (isFoundPersonReport ? 'Individual located by community member. Awaiting investigator verification.' : 'Bystander community sighting reported.'),
       photoUrl: photoUrl || undefined,
-      confidenceScore: aiPreview?.overallConfidence || 75,
+      confidenceScore: aiPreview?.overallConfidence || (isFoundPersonReport ? 90 : 75),
       matchAnalysis: aiPreview || undefined,
-      status: aiPreview?.overallConfidence >= 80 ? 'High Priority' : 'Pending Review',
-      reportedBy: reporterName || 'Community Bystander',
+      status: isFoundPersonReport ? 'High Priority' : (aiPreview?.overallConfidence >= 80 ? 'High Priority' : 'Pending Review'),
+      reportedBy: reporterName || (isFoundPersonReport ? 'Good Samaritan / Finder' : 'Community Bystander'),
+      reporterRole: currentUser?.role || 'CITIZEN',
+      isFoundPersonReport: isFoundPersonReport,
       contactNumber: contactStr,
       contactEmail: contactEmail.trim() || undefined,
     };
@@ -222,13 +228,17 @@ export const SubmitSightingModal: React.FC<SubmitSightingModalProps> = ({
       <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl w-full p-6 space-y-5 shadow-2xl relative max-h-[92vh] overflow-y-auto">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-600/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
-              <Camera className="w-5 h-5" />
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${isFoundPersonReport ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/30' : 'bg-amber-600/20 text-amber-400 border-amber-500/30'}`}>
+              {isFoundPersonReport ? <CheckCircle2 className="w-5 h-5" /> : <Camera className="w-5 h-5" />}
             </div>
             <div>
-              <h2 className="text-xl font-bold text-white">Submit Sighting Lead</h2>
+              <h2 className="text-xl font-bold text-white">
+                {isFoundPersonReport ? dict.hero.foundPersonCardTitle : dict.modal.sightingModalTitle}
+              </h2>
               <p className="text-xs text-slate-400">
-                Report an eyewitness tip with instant AI cross-examination against active alerts.
+                {isFoundPersonReport
+                  ? dict.hero.foundPersonCardDesc
+                  : dict.modal.sightingModalSubtitle}
               </p>
             </div>
           </div>
@@ -251,10 +261,47 @@ export const SubmitSightingModal: React.FC<SubmitSightingModalProps> = ({
           </div>
         </div>
 
+        {/* Report Type Selector Tabs: Sighting vs Found Person */}
+        <div className="grid grid-cols-2 gap-2 p-1 bg-slate-950 rounded-xl border border-slate-800 text-xs font-semibold">
+          <button
+            type="button"
+            onClick={() => setIsFoundPersonReport(false)}
+            className={`py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition ${
+              !isFoundPersonReport
+                ? 'bg-amber-500 text-slate-950 font-bold shadow'
+                : 'text-slate-400 hover:text-white hover:bg-slate-900'
+            }`}
+          >
+            <Eye className="w-3.5 h-3.5" />
+            <span>Eyewitness Sighting</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsFoundPersonReport(true)}
+            className={`py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition ${
+              isFoundPersonReport
+                ? 'bg-emerald-500 text-slate-950 font-bold shadow'
+                : 'text-slate-400 hover:text-white hover:bg-slate-900'
+            }`}
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            <span>Found / Located Person</span>
+          </button>
+        </div>
+
+        {isFoundPersonReport && (
+          <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-emerald-200 text-xs flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>
+              <strong>Found Person Report:</strong> This report will be flagged with top priority in the Admin & Investigator Command Center.
+            </span>
+          </div>
+        )}
+
         {clearFeedback && (
           <div className="p-3 rounded-xl bg-emerald-950/80 border border-emerald-600/60 text-emerald-200 text-xs flex items-center gap-2">
             <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span><strong>Slate Emptied:</strong> Previous sighting details removed. Ready for new input!</span>
+            <span><strong>Slate Emptied:</strong> Previous details removed. Ready for new input!</span>
           </div>
         )}
 
@@ -543,13 +590,13 @@ export const SubmitSightingModal: React.FC<SubmitSightingModalProps> = ({
                 onClick={onClose}
                 className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium"
               >
-                Cancel
+                {dict.modal.cancel}
               </button>
               <button
                 type="submit"
                 className="px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold shadow-md shadow-amber-950/40 transition active:scale-95"
               >
-                Submit Lead to Incident Command
+                {dict.modal.submitSighting}
               </button>
             </div>
           </div>

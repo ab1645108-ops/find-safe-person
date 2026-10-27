@@ -4,6 +4,7 @@ import {
   Megaphone, Bell, ShieldAlert, Radio, AlertTriangle, CheckCircle2, 
   Send, Volume2, VolumeX, Filter, Eye, Lock, Layers, Smartphone 
 } from 'lucide-react';
+import { useLanguage } from '../context/LanguageContext';
 
 interface AlertsHubProps {
   missingPersons: MissingPerson[];
@@ -18,6 +19,7 @@ export const AlertsHub: React.FC<AlertsHubProps> = ({
   onSelectPerson,
   onGenerateFlyer,
 }) => {
+  const { dict } = useLanguage();
   const activeMissingPersons = missingPersons.filter(p => !p.is_deleted && p.status !== 'Archived');
   const [alerts, setAlerts] = useState<SystemAlert[]>([]);
   const [filterSeverity, setFilterSeverity] = useState<string>('ALL');
@@ -158,20 +160,20 @@ export const AlertsHub: React.FC<AlertsHubProps> = ({
   const getAlertBadge = (type: SystemAlertType) => {
     switch (type) {
       case 'AMBER_ALERT':
-        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">AMBER ALERT</span>;
+        return <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-amber-500/20 text-amber-200 border border-amber-500/40 uppercase">AMBER ALERT</span>;
       case 'SILVER_ALERT':
-        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40">SILVER ALERT</span>;
+        return <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-blue-500/20 text-blue-200 border border-blue-500/40 uppercase">SILVER ALERT</span>;
       case 'HIGH_CONFIDENCE_SIGHTING':
-        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">SIGHTING MATCH</span>;
+        return <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-violet-500/20 text-violet-200 border border-violet-500/40 uppercase">SIGHTING MATCH</span>;
       default:
-        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300">INCIDENT ALERT</span>;
+        return <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-slate-800 text-slate-200 border border-slate-700 uppercase">INCIDENT ALERT</span>;
     }
   };
 
   return (
     <div className="space-y-6">
       {/* Header Banner */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm">
+      <div className="bg-slate-900/80 backdrop-blur-md border border-slate-700/70 rounded-2xl p-6 shadow-xl">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
@@ -179,14 +181,14 @@ export const AlertsHub: React.FC<AlertsHubProps> = ({
                 <Megaphone className="w-5 h-5" />
               </span>
               <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
-                Real-Time Incident & Broadcast Alerts Hub
+                {dict.alertsHub.title}
               </h1>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                 FEATURE 4 ACTIVE
               </span>
             </div>
             <p className="text-sm text-slate-400 mt-1">
-              Centralized emergency communications, Wireless Emergency Alerts (WEA), and field incident stream.
+              {dict.alertsHub.subtitle}
             </p>
           </div>
 
@@ -208,7 +210,7 @@ export const AlertsHub: React.FC<AlertsHubProps> = ({
               }`}
             >
               {isAuthorizedToBroadcast ? <Send className="w-4 h-4" /> : <Lock className="w-4 h-4 text-amber-400" />}
-              <span>{isAuthorizedToBroadcast ? 'Dispatch Broadcast' : 'Dispatch Broadcast (Admin Only)'}</span>
+              <span>{isAuthorizedToBroadcast ? dict.alertsHub.dispatchAlert : `${dict.alertsHub.dispatchAlert} (Admin Only)`}</span>
             </button>
           </div>
         </div>

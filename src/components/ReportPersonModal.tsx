@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { MissingPerson, AlertType, CurrentUser } from '../types';
 import { ShieldAlert, Upload, Plus, X, AlertTriangle, UserCheck, Eraser, RotateCcw, Check, Phone, Mail } from 'lucide-react';
+import { useLanguage } from '../context/LanguageContext';
 
 interface ReportPersonModalProps {
   isOpen: boolean;
@@ -15,6 +16,7 @@ export const ReportPersonModal: React.FC<ReportPersonModalProps> = ({
   onSubmit,
   currentUser,
 }) => {
+  const { dict } = useLanguage();
   const [name, setName] = useState('');
   const [age, setAge] = useState<number | ''>(25);
   const [gender, setGender] = useState<'Female' | 'Male' | 'Non-Binary' | 'Other'>('Female');
@@ -203,9 +205,9 @@ export const ReportPersonModal: React.FC<ReportPersonModalProps> = ({
               <ShieldAlert className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-white">Report Missing Person</h2>
+              <h2 className="text-xl font-bold text-white">{dict.modal.reportModalTitle}</h2>
               <p className="text-xs text-slate-400">
-                Register a new case dossier into the FindSafe AI Detection and Alert Network.
+                {dict.modal.reportModalSubtitle}
               </p>
             </div>
           </div>
@@ -685,13 +687,13 @@ export const ReportPersonModal: React.FC<ReportPersonModalProps> = ({
                 onClick={onClose}
                 className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium"
               >
-                Cancel
+                {dict.modal.cancel}
               </button>
               <button
                 type="submit"
                 className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold shadow-lg shadow-rose-950/40 transition active:scale-95"
               >
-                {currentUser?.role === 'PUBLIC_USER' ? 'Submit Emergency Missing Report' : 'Publish Case to Network'}
+                {dict.modal.submitReport}
               </button>
             </div>
           </div>

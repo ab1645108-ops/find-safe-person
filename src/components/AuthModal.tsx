@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ShieldAlert, Lock, Mail, User, Eye, EyeOff, CheckCircle2, AlertTriangle, 
   ArrowRight, KeyRound, Sparkles, X, ShieldCheck, Info, Phone, Building,
@@ -8,7 +8,11 @@ import {
   loginUser, 
   registerUser, 
   submitInvestigatorRequest, 
-  checkInvestigatorStatus 
+  checkInvestigatorStatus,
+  verifyAdminConfirmationCode,
+  resendAdminConfirmationCode,
+  requestPasswordReset,
+  submitPasswordReset
 } from '../services/authService';
 import { UserAccount, UserRole } from '../types';
 
@@ -29,8 +33,31 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   initialMode = 'login',
   initialOption = 'CITIZEN',
 }) => {
-  // Three distinct Login Options: PUBLIC CITIZEN, INVESTIGATOR, ADMIN
+  // Stealth Admin access state (hidden from public view unless unlocked via secret way)
+  const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(() => {
+    if (initialOption === 'ADMIN') return true;
+    if (typeof window === 'undefined') return false;
+    const search = window.location.search.toLowerCase();
+    const hash = window.location.hash.toLowerCase();
+    return search.includes('portal=admin') || search.includes('admin=true') || search.includes('mode=admin') || hash === '#admin';
+  });
+
+  // Selected Option
   const [selectedOption, setSelectedOption] = useState<LoginOption>(initialOption);
+
+  // Keyboard shortcut listener for Ctrl+Shift+A to toggle admin mode in modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
+        e.preventDefault();
+        setIsAdminUnlocked(true);
+        setSelectedOption('ADMIN');
+        setSubMode('login');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Sub-view mode
   const [subMode, setSubMode] = useState<
@@ -46,6 +73,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [organization, setOrganization] = useState('');
   const [investigatorId, setInvestigatorId] = useState('');
   const [additionalInfo, setAdditionalInfo] = useState('');
+
+  // Password Recovery state
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetToken, setResetToken] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [resetStep, setResetStep] = useState<'request' | 'submit'>('request');
 
   // Status check field & result
   const [checkEmail, setCheckEmail] = useState('');
@@ -64,6 +98,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [rejectionReason, setRejectionReason] = useState<string | null>(null);
   const [pendingNotice, setPendingNotice] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  // Admin 2FA Confirmation Code states
+  const [admin2FAPending, setAdmin2FAPending] = useState(false);
+  const [adminPendingToken, setAdminPendingToken] = useState('');
+  const [adminConfirmationCode, setAdminConfirmationCode] = useState('');
+  const [adminDestinationEmail, setAdminDestinationEmail] = useState('ab1645108@gmail.com');
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const [isVerifying2FA, setIsVerifying2FA] = useState(false);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
 
   if (!isOpen) return null;
 
@@ -77,12 +126,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const handleSelectOption = (opt: LoginOption) => {
     setSelectedOption(opt);
     setSubMode('login');
-    resetMessages();
-  };
-
-  const handleFillDemo = (demoEmail: string, demoPass: string) => {
-    setEmail(demoEmail);
-    setPassword(demoPass);
     resetMessages();
   };
 
@@ -106,6 +149,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     const res = await loginUser(email.trim(), password, expectedRole);
     setIsLoading(false);
 
+    if (res.requiresAdmin2FA && res.pendingToken) {
+      setAdmin2FAPending(true);
+      setAdminPendingToken(res.pendingToken);
+      setAdminDestinationEmail(res.destinationEmail || 'ab1645108@gmail.com');
+      setSuccessMsg(res.message || `A security confirmation code has been dispatched to ${res.destinationEmail || 'ab1645108@gmail.com'}.`);
+      setResendCooldown(30);
+      return;
+    }
+
     if (res.success && res.user) {
       onLoginSuccess(res.user);
       onClose();
@@ -119,15 +171,56 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         if (res.rejectionReason) {
           setRejectionReason(res.rejectionReason);
         }
-      } else if (res.code === 'INVESTIGATOR_SUSPENDED') {
-        setErrorMsg(res.error || 'Your Investigator access has been suspended or revoked. Please contact the administrator.');
-        if (res.rejectionReason) {
-          setRejectionReason(res.rejectionReason);
-        }
+      } else if (res.code === 'ROLE_MISMATCH') {
+        setErrorMsg(res.error || 'Role authorization mismatch: Please switch to the appropriate portal for your account.');
       } else {
         setErrorMsg(res.error || 'Invalid email or password.');
       }
     }
+  };
+
+  const handleVerify2FASubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    resetMessages();
+
+    if (!adminConfirmationCode.trim()) {
+      setErrorMsg('Please enter the 6-digit confirmation code.');
+      return;
+    }
+
+    setIsVerifying2FA(true);
+    const res = await verifyAdminConfirmationCode(adminPendingToken, adminConfirmationCode.trim());
+    setIsVerifying2FA(false);
+
+    if (res.success && res.user) {
+      onLoginSuccess(res.user);
+      onClose();
+    } else {
+      setErrorMsg(res.error || 'Failed to verify confirmation code. Please check and try again.');
+    }
+  };
+
+  const handleResend2FACode = async () => {
+    if (resendCooldown > 0) return;
+    resetMessages();
+
+    setIsVerifying2FA(true);
+    const res = await resendAdminConfirmationCode(adminPendingToken);
+    setIsVerifying2FA(false);
+
+    if (res.success) {
+      setSuccessMsg(`A new confirmation code has been dispatched to ${res.destinationEmail || adminDestinationEmail}.`);
+      setResendCooldown(30);
+    } else {
+      setErrorMsg(res.error || 'Failed to resend confirmation code.');
+    }
+  };
+
+  const handleCancel2FA = () => {
+    setAdmin2FAPending(false);
+    setAdminPendingToken('');
+    setAdminConfirmationCode('');
+    resetMessages();
   };
 
   // -------------------------------------------------------------
@@ -158,13 +251,74 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     const res = await registerUser(name.trim(), email.trim(), password, confirmPassword);
     setIsLoading(false);
 
-    if (res.success) {
-      setSuccessMsg('Registration successful! Please sign in with your civilian credentials.');
-      setSubMode('login');
-      setPassword('');
-      setConfirmPassword('');
+    if (res.success && res.user) {
+      setSuccessMsg('Registration successful! Welcome to FindSafe.');
+      onLoginSuccess(res.user);
+      onClose();
     } else {
-      setErrorMsg(res.error || 'Registration failed. Please check your information.');
+      setErrorMsg(res.error || 'Registration failed. An account with this email may already exist.');
+    }
+  };
+
+  // -------------------------------------------------------------
+  // Password Recovery Handlers
+  // -------------------------------------------------------------
+  const handleRequestResetSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    resetMessages();
+
+    if (!resetEmail.trim()) {
+      setErrorMsg('Please enter your registered email address.');
+      return;
+    }
+
+    setIsLoading(true);
+    const res = await requestPasswordReset(resetEmail.trim());
+    setIsLoading(false);
+
+    if (res.success) {
+      setSuccessMsg(res.message || 'Password reset token generated. Please enter your new password.');
+      if (res.resetToken) {
+        setResetToken(res.resetToken);
+      }
+      setResetStep('submit');
+    } else {
+      setErrorMsg(res.error || 'Failed to request password reset.');
+    }
+  };
+
+  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    resetMessages();
+
+    if (!resetToken.trim()) {
+      setErrorMsg('Please enter the reset token.');
+      return;
+    }
+    if (newPassword.length < 8) {
+      setErrorMsg('New password must be at least 8 characters long.');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setErrorMsg('Passwords do not match. Please verify.');
+      return;
+    }
+
+    setIsLoading(true);
+    const res = await submitPasswordReset(resetToken.trim(), newPassword, confirmNewPassword);
+    setIsLoading(false);
+
+    if (res.success) {
+      setSuccessMsg('Your password has been successfully reset! Please log in with your new credentials.');
+      setEmail(resetEmail);
+      setPassword('');
+      setSubMode('login');
+      setResetStep('request');
+      setResetToken('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+    } else {
+      setErrorMsg(res.error || 'Failed to reset password. The token may be invalid or expired.');
     }
   };
 
@@ -349,31 +503,33 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </span>
               </button>
 
-              {/* Option 3: ADMIN */}
-              <button
-                type="button"
-                onClick={() => handleSelectOption('ADMIN')}
-                className={`w-full py-2.5 px-3.5 rounded-2xl transition-all flex items-center justify-between border text-left ${
-                  selectedOption === 'ADMIN'
-                    ? 'bg-rose-950/70 border-rose-500 text-white font-bold shadow-lg shadow-rose-950/70 ring-1 ring-rose-500/50'
-                    : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-xl transition ${selectedOption === 'ADMIN' ? 'bg-rose-600 text-white shadow-md shadow-rose-900/50' : 'bg-slate-800 text-slate-400'}`}>
-                    <Shield className="w-4 h-4" />
+              {/* Option 3: ADMIN (Only visible via secret access parameter or shortcut) */}
+              {isAdminUnlocked && (
+                <button
+                  type="button"
+                  onClick={() => handleSelectOption('ADMIN')}
+                  className={`w-full py-2.5 px-3.5 rounded-2xl transition-all flex items-center justify-between border text-left ${
+                    selectedOption === 'ADMIN'
+                      ? 'bg-rose-950/70 border-rose-500 text-white font-bold shadow-lg shadow-rose-950/70 ring-1 ring-rose-500/50'
+                      : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-xl transition ${selectedOption === 'ADMIN' ? 'bg-rose-600 text-white shadow-md shadow-rose-900/50' : 'bg-slate-800 text-slate-400'}`}>
+                      <Shield className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="text-xs tracking-wide font-mono font-bold block">3. ADMIN</span>
+                      <span className="text-[10px] text-slate-400 font-normal">System Administration & Investigator Approvals</span>
+                    </div>
                   </div>
-                  <div>
-                    <span className="text-xs tracking-wide font-mono font-bold block">3. ADMIN</span>
-                    <span className="text-[10px] text-slate-400 font-normal">System Administration & Investigator Approvals</span>
-                  </div>
-                </div>
-                <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
-                  selectedOption === 'ADMIN' ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 font-bold' : 'bg-slate-900 text-slate-500 border-slate-800'
-                }`}>
-                  {selectedOption === 'ADMIN' ? '● SELECTED' : 'PRIVILEGED'}
-                </span>
-              </button>
+                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
+                    selectedOption === 'ADMIN' ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 font-bold' : 'bg-slate-900 text-slate-500 border-slate-800'
+                  }`}>
+                    {selectedOption === 'ADMIN' ? '● SELECTED' : 'PRIVILEGED'}
+                  </span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -390,6 +546,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <span className="text-[11px] text-rose-300 block mt-1 bg-rose-900/40 p-2 rounded-lg border border-rose-800/60 font-mono">
                     <strong>Reason:</strong> {rejectionReason}
                   </span>
+                )}
+                {errorMsg.toLowerCase().includes('already exists') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSubMode('login');
+                      resetMessages();
+                    }}
+                    className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-400 hover:text-emerald-300 underline cursor-pointer"
+                  >
+                    <span>Already have an account? Sign In here</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
                 )}
               </div>
             </div>
@@ -499,17 +668,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       className="w-full py-2 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700 text-xs font-semibold text-slate-200 hover:text-white transition flex items-center justify-center gap-1.5"
                     >
                       <span>Create Account</span>
-                    </button>
-                  </div>
-
-                  {/* Quick-fill demo account */}
-                  <div className="pt-2 border-t border-slate-800 text-center">
-                    <button
-                      type="button"
-                      onClick={() => handleFillDemo('citizen@findsafe.ai', 'Citizen@1234')}
-                      className="text-[11px] text-slate-400 hover:text-emerald-300 font-mono underline"
-                    >
-                      Quick-Fill Test Citizen Account (citizen@findsafe.ai)
                     </button>
                   </div>
                 </form>
@@ -632,13 +790,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <>
               {subMode === 'login' && (
                 <form onSubmit={handleLoginSubmit} className="space-y-4">
-                  <div className="p-3.5 rounded-xl bg-blue-950/60 border border-blue-800/80 text-xs text-blue-200 space-y-1">
+                  <div className="p-3.5 rounded-xl bg-blue-950/70 border border-blue-800 text-xs text-blue-200 space-y-1.5">
                     <div className="flex items-center gap-2 font-bold text-blue-300">
-                      <ShieldCheck className="w-4 h-4" />
-                      <span>Investigator Authorization Required</span>
+                      <ShieldCheck className="w-4 h-4 text-blue-400 shrink-0" />
+                      <span>Law Enforcement & SAR Protected Portal</span>
                     </div>
                     <p className="text-[11px] text-blue-200/90 leading-relaxed">
-                      Investigators must first submit an Access Request and be <strong>APPROVED</strong> by an Administrator before accessing the Investigator Dashboard.
+                      Secured access area. Requires active database credentials and cryptographic session authentication. Brute-force rate limiting and comprehensive audit logging active.
                     </p>
                   </div>
 
@@ -721,21 +879,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     </button>
                   </div>
 
-                  <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-[11px]">
+                  <div className="pt-2 border-t border-slate-800 text-center text-[11px]">
                     <button
                       type="button"
                       onClick={() => setSubMode('check-status')}
-                      className="text-slate-400 hover:text-blue-300 flex items-center gap-1"
+                      className="text-slate-400 hover:text-blue-300 inline-flex items-center gap-1.5"
                     >
-                      <Search className="w-3 h-3" />
+                      <Search className="w-3.5 h-3.5" />
                       <span>Check Request Status</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleFillDemo('investigator@findsafe.ai', 'Investigator@1234')}
-                      className="text-slate-400 hover:text-blue-300 font-mono underline"
-                    >
-                      Approved Demo Account
                     </button>
                   </div>
                 </form>
@@ -1015,11 +1166,90 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           {/* ======================================================== */}
           {selectedOption === 'ADMIN' && (
             <>
-              {subMode === 'login' && (
+              {admin2FAPending ? (
+                <form onSubmit={handleVerify2FASubmit} className="space-y-4">
+                  <div className="p-3.5 rounded-xl bg-rose-950/70 border border-rose-800 text-xs text-rose-200 space-y-2">
+                    <div className="flex items-center gap-2 font-bold text-rose-300">
+                      <Mail className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span>Security Confirmation Code Sent</span>
+                    </div>
+                    <p className="text-[11px] text-rose-200/90 leading-relaxed">
+                      Every single administrator login requires a confirmation code sent to:
+                    </p>
+                    <div className="flex items-center gap-2 bg-slate-950/80 p-2 rounded-lg border border-rose-900/60 font-mono text-xs text-white">
+                      <BadgeCheck className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                      <span className="font-bold">{adminDestinationEmail}</span>
+                    </div>
+                    <p className="text-[10px] text-slate-400">
+                      Code expires in 10 minutes.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-mono uppercase tracking-wider text-slate-300 mb-2 text-center">
+                      Enter 6-Digit Security PIN *
+                    </label>
+                    <div className="max-w-xs mx-auto">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        maxLength={6}
+                        autoFocus
+                        value={adminConfirmationCode}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 6);
+                          setAdminConfirmationCode(val);
+                        }}
+                        placeholder="••••••"
+                        className="w-full text-center py-3 px-4 bg-slate-950 border-2 border-rose-500/60 rounded-xl font-mono text-2xl font-bold tracking-[0.4em] text-white placeholder-slate-700 focus:outline-none focus:ring-2 focus:ring-rose-500/50 focus:border-rose-400 transition"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isVerifying2FA || adminConfirmationCode.trim().length < 6}
+                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white text-xs font-bold shadow-lg shadow-rose-950/60 transition active:scale-[0.99] flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isVerifying2FA ? (
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-4 h-4" />
+                        <span>Verify PIN & Enter Terminal</span>
+                      </>
+                    )}
+                  </button>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
+                    <button
+                      type="button"
+                      onClick={handleCancel2FA}
+                      className="text-slate-400 hover:text-slate-200 transition"
+                    >
+                      &larr; Back to Login
+                    </button>
+                    <button
+                      type="button"
+                      disabled={resendCooldown > 0 || isVerifying2FA}
+                      onClick={handleResend2FACode}
+                      className="text-rose-400 hover:text-rose-300 font-semibold transition disabled:opacity-40"
+                    >
+                      {resendCooldown > 0 ? `Resend Code (${resendCooldown}s)` : 'Resend Code'}
+                    </button>
+                  </div>
+                </form>
+              ) : subMode === 'login' ? (
                 <form onSubmit={handleLoginSubmit} className="space-y-4">
-                  <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-800/80 text-xs text-rose-200 flex items-center gap-2">
-                    <Shield className="w-4 h-4 text-rose-400 shrink-0" />
-                    <span>Administrator Command Console: Review requests, manage users & audit compliance.</span>
+                  <div className="p-3.5 rounded-xl bg-rose-950/70 border border-rose-800 text-xs text-rose-200 space-y-1.5">
+                    <div className="flex items-center gap-2 font-bold text-rose-300">
+                      <Shield className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span>Operations Command • High Security Clearance</span>
+                    </div>
+                    <p className="text-[11px] text-rose-200/90 leading-relaxed">
+                      Restricted to authorized System Administrators. Protected by PBKDF2-SHA512 password hashing, IP rate limiting, and brute-force lockout. All authentication attempts are written to the SQLite audit database.
+                    </p>
                   </div>
 
                   <div>
@@ -1032,7 +1262,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         type="email"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        placeholder="admin@findsafe.ai"
+                        placeholder="Enter administrator email"
                         required
                         className="w-full pl-10 pr-4 py-2.5 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500 transition"
                       />
@@ -1086,43 +1316,135 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       </>
                     )}
                   </button>
+                </form>
+              ) : null}
+            </>
+          )}
 
-                  <div className="pt-2 border-t border-slate-800 text-center">
+          {/* FORGOT PASSWORD FORM */}
+          {subMode === 'forgot-password' && (
+            <div className="space-y-4 animate-in fade-in">
+              <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-1 text-xs text-slate-300">
+                <div className="flex items-center gap-2 text-indigo-400 font-bold">
+                  <KeyRound className="w-4 h-4" />
+                  <span>Account Password Recovery</span>
+                </div>
+                <p className="text-slate-400 text-[11px] leading-relaxed">
+                  Enter your registered account email address to generate a secure, single-use password reset token.
+                </p>
+              </div>
+
+              {resetStep === 'request' ? (
+                <form onSubmit={handleRequestResetSubmit} className="space-y-3.5">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Registered Email Address
+                    </label>
+                    <div className="relative">
+                      <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="email"
+                        value={resetEmail}
+                        onChange={(e) => setResetEmail(e.target.value)}
+                        placeholder="you@example.com"
+                        required
+                        className="w-full pl-10 pr-4 py-2.5 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
                     <button
                       type="button"
-                      onClick={() => handleFillDemo('admin@findsafe.ai', 'Admin@1234')}
-                      className="text-[11px] text-slate-400 hover:text-rose-300 font-mono underline"
+                      onClick={() => {
+                        setSubMode('login');
+                        resetMessages();
+                      }}
+                      className="w-1/3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-xs font-semibold text-slate-300 transition"
                     >
-                      Quick-Fill Authorized Administrator (admin@findsafe.ai)
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isLoading}
+                      className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-lg shadow-indigo-950/50 transition flex items-center justify-center gap-1.5 disabled:opacity-50"
+                    >
+                      {isLoading ? (
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      ) : (
+                        <span>Generate Reset Token</span>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={handleResetPasswordSubmit} className="space-y-3.5">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Password Reset Token
+                    </label>
+                    <input
+                      type="text"
+                      value={resetToken}
+                      onChange={(e) => setResetToken(e.target.value)}
+                      placeholder="Paste reset token here"
+                      required
+                      className="w-full px-3.5 py-2.5 bg-slate-950/80 border border-slate-800 rounded-xl text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      New Password (min 8 characters)
+                    </label>
+                    <input
+                      type="password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="Enter new password"
+                      minLength={8}
+                      required
+                      className="w-full px-3.5 py-2.5 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Confirm New Password
+                    </label>
+                    <input
+                      type="password"
+                      value={confirmNewPassword}
+                      onChange={(e) => setConfirmNewPassword(e.target.value)}
+                      placeholder="Re-type new password"
+                      minLength={8}
+                      required
+                      className="w-full px-3.5 py-2.5 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition"
+                    />
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setResetStep('request')}
+                      className="w-1/3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-xs font-semibold text-slate-300 transition"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isLoading}
+                      className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-950/50 transition flex items-center justify-center gap-1.5 disabled:opacity-50"
+                    >
+                      {isLoading ? (
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      ) : (
+                        <span>Update Password</span>
+                      )}
                     </button>
                   </div>
                 </form>
               )}
-            </>
-          )}
-
-          {/* FORGOT PASSWORD DRAWER */}
-          {subMode === 'forgot-password' && (
-            <div className="space-y-4 animate-in fade-in">
-              <div className="p-4 rounded-2xl bg-slate-850 border border-slate-800 space-y-2.5">
-                <div className="flex items-center gap-2 text-amber-300">
-                  <KeyRound className="w-4 h-4" />
-                  <span className="text-xs font-bold">Password Recovery Assistance</span>
-                </div>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  For law enforcement, investigator, and administrator credentials, password resets must be authorized through your designated agency Dispatch Supervisor or System Administrator.
-                </p>
-                <p className="text-xs text-slate-400">
-                  For civilian citizen accounts, please contact system administration at <span className="text-rose-400 font-mono">support@findsafe.ai</span> with your registered email.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSubMode('login')}
-                className="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-xs font-semibold text-slate-300 transition"
-              >
-                Back to Sign In
-              </button>
             </div>
           )}
         </div>

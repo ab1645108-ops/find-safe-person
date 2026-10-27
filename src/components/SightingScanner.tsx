@@ -3,13 +3,19 @@ import { MissingPerson, SightingLead, CurrentUser } from '../types';
 import { 
   Camera, Upload, Sparkles, CheckCircle2, AlertTriangle, ShieldCheck, 
   RefreshCw, Scan, ArrowRight, MapPin, User, FileText, X, Video, VideoOff,
-  Eraser, RotateCcw, Check, ShieldAlert, XCircle, Activity 
+  Eraser, RotateCcw, Check, ShieldAlert, XCircle, Activity, ListFilter
 } from 'lucide-react';
+import { SightingLeadsQueue } from './SightingLeadsQueue';
+import { useLanguage } from '../context/LanguageContext';
 
 interface SightingScannerProps {
   missingPersons: MissingPerson[];
+  sightings?: SightingLead[];
   onLeadVerified: (lead: SightingLead) => void;
+  onUpdateLead?: (leadId: string, updates: Partial<SightingLead>) => void;
+  onDeleteLead?: (leadId: string) => void;
   onSelectPerson: (person: MissingPerson) => void;
+  onConfirmPersonFound?: (person: MissingPerson) => void;
   preselectedPersonId?: string;
   isPublicCitizen?: boolean;
   currentUser?: CurrentUser;
@@ -17,12 +23,20 @@ interface SightingScannerProps {
 
 export const SightingScanner: React.FC<SightingScannerProps> = ({
   missingPersons,
+  sightings = [],
   onLeadVerified,
+  onUpdateLead,
+  onDeleteLead,
   onSelectPerson,
+  onConfirmPersonFound,
   preselectedPersonId,
   isPublicCitizen = false,
   currentUser,
 }) => {
+  const { dict } = useLanguage();
+  const [activeSubTab, setActiveSubTab] = useState<'queue' | 'scan'>(
+    preselectedPersonId ? 'scan' : (sightings.length > 0 ? 'queue' : 'scan')
+  );
   const [selectedPersonId, setSelectedPersonId] = useState<string>(preselectedPersonId || 'ALL');
   const [sightingImage, setSightingImage] = useState<string | null>(null);
   const [sightingNotes, setSightingNotes] = useState<string>('');
@@ -350,6 +364,14 @@ export const SightingScanner: React.FC<SightingScannerProps> = ({
     setLeadLogged(true);
   };
 
+  const handleSearchLeadWithAi = (lead: SightingLead) => {
+    if (!lead.photoUrl) return;
+    setSightingImage(lead.photoUrl);
+    setSightingNotes(lead.notes || 'Public eyewitness lead photo submitted for active registry match.');
+    setSelectedPersonId(lead.personId || 'ALL');
+    setActiveSubTab('scan');
+  };
+
   return (
     <div className="space-y-6">
       {/* Module Title Banner */}
@@ -357,23 +379,63 @@ export const SightingScanner: React.FC<SightingScannerProps> = ({
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30">
-              {isPublicCitizen ? 'PUBLIC CITIZEN AI MATCHER' : 'MULTIMODAL AI PHOTO SEARCH'}
+              {isPublicCitizen ? 'PUBLIC CITIZEN AI MATCHER' : 'MULTIMODAL AI PHOTO SEARCH & LEADS'}
             </span>
             <span className="text-xs text-slate-400 font-mono">Gemini 3.8 Flash Engine</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
-            {isPublicCitizen ? 'Community AI Sighting Scanner & Matcher' : 'AI Photo Matcher & Registry Search'}
+            {dict.scanner.title}
           </h1>
           <p className="text-sm text-slate-400 mt-1 max-w-2xl">
-            {isPublicCitizen
-              ? 'Have you seen someone who might match an active missing alert? Upload a photograph or capture with your camera to run multimodal biometric and apparel correlation against active bulletins.'
-              : 'Upload a photograph or capture camera evidence to automatically search across all active missing persons dossiers. Calculates biometric facial resemblance, apparel consistency, and immediate SAR response priorities.'}
+            {dict.scanner.subtitle}
           </p>
         </div>
       </div>
 
-      {/* Main Grid: Input & Match Comparison */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      {/* Sub-Navigation Tabs */}
+      <div className="flex items-center gap-2 border-b border-slate-800 pb-3 flex-wrap">
+        <button
+          onClick={() => setActiveSubTab('queue')}
+          className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition flex items-center gap-2 ${
+            activeSubTab === 'queue'
+              ? 'bg-rose-600 text-white shadow-md shadow-rose-900/40 ring-1 ring-rose-400/50'
+              : 'text-slate-400 hover:text-white hover:bg-slate-850'
+          }`}
+        >
+          <ListFilter className="w-4 h-4 text-rose-300" />
+          <span>{dict.leads.title}</span>
+          <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-slate-950 text-rose-300 border border-rose-500/40 font-mono">
+            {sightings.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('scan')}
+          className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition flex items-center gap-2 ${
+            activeSubTab === 'scan'
+              ? 'bg-rose-600 text-white shadow-md shadow-rose-900/40 ring-1 ring-rose-400/50'
+              : 'text-slate-400 hover:text-white hover:bg-slate-850'
+          }`}
+        >
+          <Scan className="w-4 h-4" />
+          <span>{dict.scanner.title}</span>
+        </button>
+      </div>
+
+      {activeSubTab === 'queue' ? (
+        <SightingLeadsQueue
+          sightings={sightings}
+          missingPersons={missingPersons}
+          currentUser={currentUser}
+          onSearchWithAi={handleSearchLeadWithAi}
+          onUpdateLead={onUpdateLead}
+          onDeleteLead={onDeleteLead}
+          onSelectPerson={onSelectPerson}
+          onOpenScannerTab={() => setActiveSubTab('scan')}
+        />
+      ) : (
+        /* Main Grid: Input & Match Comparison */
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Column: Image/Camera Input & Metadata (5 cols) */}
         <div className="lg:col-span-5 space-y-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
@@ -1239,6 +1301,7 @@ export const SightingScanner: React.FC<SightingScannerProps> = ({
           )}
         </div>
       </div>
+      )}
     </div>
   );
 };

@@ -456,12 +456,11 @@ async function startServer() {
   const server = http.createServer(app);
 
   if (process.env.NODE_ENV !== "production") {
+    const isHmrDisabled = process.env.DISABLE_HMR === "true";
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
-        hmr: {
-          server,
-        },
+        hmr: isHmrDisabled ? false : { server },
       },
       appType: "spa",
     });

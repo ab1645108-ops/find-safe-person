@@ -2,12 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { 
   ShieldCheck, ShieldAlert, PlusCircle, Camera, Search, MapPin, 
   Clock, CheckCircle2, AlertTriangle, FileText, ArrowRight, 
-  ExternalLink, Printer, Lock, Info, HeartHandshake, Eye, Sparkles, UserCheck,
+  ExternalLink, Printer, Info, HeartHandshake, Eye, Sparkles, UserCheck,
   Eraser, X, User, Scan, Edit3, Trash2, FolderLock, Smartphone 
 } from 'lucide-react';
 import { MissingPerson, SightingLead, CurrentUser, AlertType } from '../types';
 import { EditCaseModal } from './EditCaseModal';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
+import { useLanguage } from '../context/LanguageContext';
 
 interface PublicPortalProps {
   missingPersons: MissingPerson[];
@@ -16,7 +17,7 @@ interface PublicPortalProps {
   onOpenSightingModal: (preselectedPersonId?: string) => void;
   onOpenPrintFlyer: (person: MissingPerson) => void;
   currentUser: CurrentUser;
-  onSwitchToOfficial: () => void;
+  onSwitchToOfficial?: () => void;
   onLeadVerified?: (lead: SightingLead) => void;
   activeTab?: 'scanner' | 'cases' | 'alerts' | 'duplicates' | 'assistant' | 'users';
   onTabChange?: (tab: 'scanner' | 'cases' | 'alerts' | 'duplicates' | 'assistant' | 'users') => void;
@@ -40,6 +41,7 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
   onUpdatePerson,
   onDeletePerson,
 }) => {
+  const { dict } = useLanguage();
   const [activeSection, setActiveSection] = useState<'overview' | 'myreports' | 'track'>('overview');
   const [searchOption, setSearchOption] = useState<'NAME' | 'CODE' | 'REPORTER' | 'ALL'>('NAME');
   const [searchTrackingCode, setSearchTrackingCode] = useState('');
@@ -230,107 +232,81 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
 
   return (
     <div className="space-y-8 max-w-6xl mx-auto pb-12">
-      {/* Civilian Privacy Notice Banner */}
-      <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 border border-slate-700/80 p-4 sm:p-5 shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-blue-500/20 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0 mt-0.5">
-            <Lock className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-blue-300 font-mono">
-                PUBLIC CITIZEN ACCESS PORTAL
-              </span>
-              <span className="text-[10px] px-2 py-0.2 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-                DATA PRIVACY ACTIVE
-              </span>
-            </div>
-            <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-              Confidential law enforcement dossiers, internal witness leads, and SAR telemetry are restricted to verified Investigators & Dispatch Administrators. Public citizens can submit missing reports, provide sighting tips, and track their own registered cases.
-            </p>
-          </div>
-        </div>
-        <button
-          onClick={onSwitchToOfficial}
-          className="shrink-0 flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-600 text-xs font-semibold hover:border-slate-500 transition shadow-sm"
-        >
-          <UserCheck className="w-4 h-4 text-emerald-400" />
-          <span>Switch to Investigator / Admin</span>
-        </button>
-      </div>
 
       {/* Hero Welcome & Emergency Action Cards */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900 to-rose-950/40 border border-slate-800 p-6 sm:p-10 shadow-2xl">
+      <div className="relative overflow-hidden rounded-3xl bg-slate-900/80 backdrop-blur-md border border-slate-700/70 p-6 sm:p-10 shadow-2xl">
+        {/* Subtle multi-color ambient lighting behind hero */}
+        <div className="absolute -top-24 -left-24 w-80 h-80 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute top-1/2 -right-24 w-80 h-80 bg-violet-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-24 left-1/3 w-80 h-80 bg-amber-500/08 rounded-full blur-3xl pointer-events-none" />
+
         <div className="relative z-10 max-w-3xl space-y-4">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-semibold">
-            <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
-            <span>24/7 Community Search & Rescue Network</span>
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/30 text-xs font-semibold">
+            <span className="w-2 h-2 rounded-full bg-blue-400 animate-ping" />
+            <span>{dict.hero.badge}</span>
           </div>
           <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-white tracking-tight leading-tight">
-            FindSafe Public Safety <br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-rose-400 via-amber-300 to-rose-300">
-              Community Reporting Hub
-            </span>
+            {dict.hero.title}
           </h1>
-          <p className="text-sm sm:text-base text-slate-300 leading-relaxed max-w-2xl">
-            If someone you know is missing, or you have seen a person matching a public alert, report immediately. Every second matters. All submissions are triaged by sworn law enforcement and dispatch SAR units.
+          <p className="text-sm sm:text-base text-slate-200 leading-relaxed max-w-2xl font-normal">
+            {dict.hero.subtitle}
           </p>
         </div>
 
-        {/* Big Action Buttons */}
+        {/* Big Action Buttons - Coordinated Multi-Color Grading */}
         <div className="relative z-10 mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Card 1: Report Missing */}
+          {/* Card 1: Report Missing (Warm Coral / Crimson) */}
           <div 
             onClick={onOpenReportModal}
-            className="group cursor-pointer rounded-2xl bg-gradient-to-b from-rose-900/60 to-rose-950/90 border border-rose-700/60 hover:border-rose-500 p-5 transition-all duration-200 hover:shadow-xl hover:shadow-rose-950/50 flex flex-col justify-between"
+            className="group cursor-pointer rounded-2xl bg-gradient-to-b from-rose-950/35 via-slate-900/90 to-slate-900/90 border border-rose-500/35 hover:border-rose-400 p-5.5 transition-all duration-200 hover:shadow-xl hover:shadow-rose-950/30 flex flex-col justify-between relative overflow-hidden"
           >
             <div className="space-y-3">
-              <div className="w-12 h-12 rounded-xl bg-rose-600 text-white flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-rose-500 to-rose-600 text-white flex items-center justify-center shadow-lg shadow-rose-950/50 group-hover:scale-105 transition-transform">
                 <PlusCircle className="w-6 h-6" />
               </div>
               <h3 className="text-lg font-bold text-white group-hover:text-rose-200 transition">
-                Report a Missing Person
+                {dict.hero.reportMissingCardTitle}
               </h3>
-              <p className="text-xs text-rose-200/80 leading-relaxed">
-                Submit an urgent missing report for a family member, child, or endangered person. Generates a private reference code.
+              <p className="text-xs text-slate-300 leading-relaxed font-normal">
+                {dict.hero.reportMissingCardDesc}
               </p>
             </div>
-            <div className="mt-5 pt-3 border-t border-rose-800/60 flex items-center justify-between text-xs font-bold text-rose-300 group-hover:text-white">
-              <span>Start Emergency Report</span>
+            <div className="mt-5 pt-3 border-t border-rose-900/40 flex items-center justify-between text-xs font-bold text-rose-300 group-hover:text-rose-100">
+              <span>{dict.hero.reportMissingCardCta}</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </div>
           </div>
 
-          {/* Card 2: Submit Sighting / Found Person */}
+          {/* Card 2: Submit Sighting / Found Person (Warm Honey Amber) */}
           <div 
             onClick={() => onOpenSightingModal()}
-            className="group cursor-pointer rounded-2xl bg-gradient-to-b from-amber-950/40 to-slate-900 border border-amber-700/50 hover:border-amber-500 p-5 transition-all duration-200 hover:shadow-xl hover:shadow-amber-950/30 flex flex-col justify-between"
+            className="group cursor-pointer rounded-2xl bg-gradient-to-b from-amber-950/30 via-slate-900/90 to-slate-900/90 border border-amber-500/35 hover:border-amber-400 p-5.5 transition-all duration-200 hover:shadow-xl hover:shadow-amber-950/30 flex flex-col justify-between relative overflow-hidden"
           >
             <div className="space-y-3">
-              <div className="w-12 h-12 rounded-xl bg-amber-600 text-white flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-amber-600 text-white flex items-center justify-center shadow-lg shadow-amber-950/50 group-hover:scale-105 transition-transform">
                 <Camera className="w-6 h-6" />
               </div>
               <h3 className="text-lg font-bold text-white group-hover:text-amber-200 transition">
-                Report Sighting / Found Person
+                {dict.hero.foundPersonCardTitle}
               </h3>
-              <p className="text-xs text-amber-200/80 leading-relaxed">
-                Spotted someone or located a lost child/elderly person? Submit photos, location coordinates, and eyewitness notes directly to SAR investigators.
+              <p className="text-xs text-slate-300 leading-relaxed font-normal">
+                {dict.hero.foundPersonCardDesc}
               </p>
             </div>
-            <div className="mt-5 pt-3 border-t border-amber-800/40 flex items-center justify-between text-xs font-bold text-amber-300 group-hover:text-white">
-              <span>Submit Eyewitness Tip</span>
+            <div className="mt-5 pt-3 border-t border-amber-900/40 flex items-center justify-between text-xs font-bold text-amber-300 group-hover:text-amber-100">
+              <span>{dict.hero.foundPersonCardCta}</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </div>
           </div>
 
-          {/* Card 3: Our / My Reported Cases & Tracking */}
+          {/* Card 3: Our / My Reported Cases & Tracking (Sapphire Ocean Blue) */}
           <div 
             onClick={() => setActiveSection('myreports')}
-            className="group cursor-pointer rounded-2xl bg-gradient-to-b from-blue-950/40 to-slate-900 border border-blue-700/50 hover:border-blue-500 p-5 transition-all duration-200 hover:shadow-xl hover:shadow-blue-950/30 flex flex-col justify-between"
+            className="group cursor-pointer rounded-2xl bg-gradient-to-b from-blue-950/30 via-slate-900/90 to-slate-900/90 border border-blue-500/35 hover:border-blue-400 p-5.5 transition-all duration-200 hover:shadow-xl hover:shadow-blue-950/30 flex flex-col justify-between relative overflow-hidden"
           >
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <div className="w-12 h-12 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-blue-950/50 group-hover:scale-105 transition-transform">
                   <FolderLock className="w-6 h-6" />
                 </div>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/40 font-bold">
@@ -338,37 +314,39 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
                 </span>
               </div>
               <h3 className="text-lg font-bold text-white group-hover:text-blue-200 transition">
-                Our Reported Cases & Edits
+                {dict.portal.myReportsTitle}
               </h3>
-              <p className="text-xs text-blue-200/80 leading-relaxed">
-                View only your submitted cases. Edit details, change clothing/photos, or delete reports with immediate sync to investigators.
+              <p className="text-xs text-slate-300 leading-relaxed font-normal">
+                {dict.portal.myReportsDesc}
               </p>
             </div>
-            <div className="mt-5 pt-3 border-t border-blue-800/40 flex items-center justify-between text-xs font-bold text-blue-300 group-hover:text-white">
-              <span>Manage My Submissions</span>
+            <div className="mt-5 pt-3 border-t border-blue-900/40 flex items-center justify-between text-xs font-bold text-blue-300 group-hover:text-blue-100">
+              <span>{dict.portal.myReportsTab}</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </div>
           </div>
         </div>
-
-        {/* Ambient background glow */}
-        <div className="absolute top-0 right-0 w-96 h-96 bg-rose-600/10 rounded-full blur-3xl pointer-events-none" />
       </div>
 
-      {/* Navigation Sub-Tabs for Public Page */}
-      <div className="flex items-center gap-2 border-b border-slate-800 pb-3 flex-wrap">
+      {/* Navigation Sub-Tabs for Public Page - Matching Harmonious Colors */}
+      <div className="flex items-center gap-2 border-b border-slate-800/80 pb-3 flex-wrap">
         <button
           onClick={() => {
             setActiveSection('overview');
             onTabChange?.('cases');
           }}
-          className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition ${
+          className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition flex items-center gap-2 ${
             activeSection === 'overview'
-              ? 'bg-rose-600 text-white shadow-md shadow-rose-900/40'
-              : 'text-slate-400 hover:text-white hover:bg-slate-850'
+              ? 'bg-blue-600 text-white shadow-md shadow-blue-900/30 border border-blue-400/50'
+              : 'text-slate-300 hover:text-white hover:bg-slate-800/80 border border-transparent'
           }`}
         >
-          Public Safety Bulletins ({publicBulletins.length})
+          <span>{dict.portal.overviewTab}</span>
+          <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-mono font-bold ${
+            activeSection === 'overview' ? 'bg-blue-500 text-white' : 'bg-slate-800 text-slate-300'
+          }`}>
+            {publicBulletins.length}
+          </span>
         </button>
         <button
           onClick={() => {
@@ -377,13 +355,15 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
           }}
           className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition flex items-center gap-1.5 ${
             activeSection === 'myreports'
-              ? 'bg-rose-600 text-white shadow-md shadow-rose-900/40 ring-1 ring-rose-400/50'
-              : 'text-slate-400 hover:text-white hover:bg-slate-850'
+              ? 'bg-amber-600 text-white shadow-md shadow-amber-900/30 border border-amber-400/50'
+              : 'text-slate-300 hover:text-white hover:bg-slate-800/80 border border-transparent'
           }`}
         >
           <FolderLock className="w-4 h-4 text-amber-300" />
-          <span>Our Reported Cases</span>
-          <span className="px-1.5 py-0.2 text-[10px] font-bold rounded-full bg-slate-800 text-slate-200 border border-slate-700">
+          <span>{dict.portal.myReportsTab}</span>
+          <span className={`px-1.5 py-0.2 text-[10px] font-bold rounded-full font-mono ${
+            activeSection === 'myreports' ? 'bg-amber-500 text-white' : 'bg-slate-800 text-slate-300'
+          }`}>
             {myReportedCases.length}
           </span>
         </button>
@@ -394,12 +374,12 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
           }}
           className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition flex items-center gap-1.5 ${
             activeSection === 'track'
-              ? 'bg-rose-600 text-white shadow-md shadow-rose-900/40'
-              : 'text-slate-400 hover:text-white hover:bg-slate-850'
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/30 border border-indigo-400/50'
+              : 'text-slate-300 hover:text-white hover:bg-slate-800/80 border border-transparent'
           }`}
         >
           <Search className="w-4 h-4" />
-          <span>Track My Case / Report</span>
+          <span>{dict.portal.trackTab}</span>
         </button>
       </div>
 
@@ -502,12 +482,12 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
                       className="flex-1 py-2 px-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition shadow-md shadow-amber-950/40"
                     >
                       <Camera className="w-3.5 h-3.5" />
-                      <span>Submit Sighting Tip</span>
+                      <span>{dict.portal.reportSightingFor}</span>
                     </button>
                     <button
                       onClick={() => onOpenPrintFlyer(person)}
                       className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition"
-                      title="Download / Print Public Missing Poster"
+                      title={dict.portal.printFlyer}
                     >
                       <Printer className="w-4 h-4 text-slate-300" />
                     </button>

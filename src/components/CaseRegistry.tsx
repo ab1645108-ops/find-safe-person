@@ -3,10 +3,11 @@ import { MissingPerson, SightingLead, AlertType, CurrentUser } from '../types';
 import { 
   Search, Filter, MapPin, Clock, AlertTriangle, HeartPulse, User, 
   ExternalLink, Printer, Eye, ShieldAlert, CheckCircle2, ChevronRight, Sparkles,
-  ShieldCheck, BadgeCheck, Check, Lock, FileCheck, Eraser, X, Phone, Mail, UserCheck, Send, Trash2
+  ShieldCheck, BadgeCheck, Check, Lock, FileCheck, Eraser, X, Phone, Mail, UserCheck, Send, Trash2, Camera
 } from 'lucide-react';
 import { ConfirmFoundModal } from './ConfirmFoundModal';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
+import { useLanguage } from '../context/LanguageContext';
 
 interface CaseRegistryProps {
   missingPersons: MissingPerson[];
@@ -16,7 +17,6 @@ interface CaseRegistryProps {
   onGenerateAlertsForPerson: (person: MissingPerson) => void;
   onPrintFlyer: (person: MissingPerson) => void;
   onMarkStatus: (personId: string, newStatus: 'Active' | 'Located Safe') => void;
-  onAgeProgression?: (person: MissingPerson) => void;
   currentUser?: CurrentUser;
   onVerifyCase?: (personId: string, notes: string) => void;
   onUpdatePerson?: (updatedPerson: MissingPerson) => void;
@@ -31,12 +31,12 @@ export const CaseRegistry: React.FC<CaseRegistryProps> = ({
   onGenerateAlertsForPerson,
   onPrintFlyer,
   onMarkStatus,
-  onAgeProgression,
   currentUser,
   onVerifyCase,
   onUpdatePerson,
   onDeletePerson,
 }) => {
+  const { dict } = useLanguage();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<string>('ALL');
   const [selectedCase, setSelectedCase] = useState<MissingPerson | null>(null);
@@ -115,26 +115,26 @@ export const CaseRegistry: React.FC<CaseRegistryProps> = ({
     switch (type) {
       case 'AMBER':
         return (
-          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 uppercase tracking-wider">
+          <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold bg-amber-500/20 text-amber-200 border border-amber-500/40 uppercase tracking-wider">
             AMBER ALERT
           </span>
         );
       case 'SILVER':
         return (
-          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40 uppercase tracking-wider">
+          <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold bg-blue-500/20 text-blue-200 border border-blue-500/40 uppercase tracking-wider">
             SILVER ALERT (SENIOR)
           </span>
         );
       case 'CRITICAL_MEDICAL':
         return (
-          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 uppercase tracking-wider">
+          <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold bg-rose-500/20 text-rose-200 border border-rose-500/40 uppercase tracking-wider">
             CRITICAL MEDICAL
           </span>
         );
       case 'ENDANGERED':
       default:
         return (
-          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 uppercase tracking-wider">
+          <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold bg-violet-500/20 text-violet-200 border border-violet-500/40 uppercase tracking-wider">
             ENDANGERED MISSING
           </span>
         );
@@ -166,10 +166,10 @@ export const CaseRegistry: React.FC<CaseRegistryProps> = ({
               </span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              Investigative Missing Persons Registry & Dossiers
+              {dict.cases.title}
             </h1>
             <p className="text-xs sm:text-sm text-slate-300">
-              Complete law enforcement case files, confidential medical records, witness sighting history, and dispatch controls.
+              {dict.cases.subtitle}
             </p>
           </div>
 
@@ -181,10 +181,10 @@ export const CaseRegistry: React.FC<CaseRegistryProps> = ({
             </div>
             <div className="flex items-center gap-2">
               <span className="px-3 py-2 rounded-xl bg-rose-600/20 text-rose-300 font-mono font-bold text-xs border border-rose-500/30">
-                {missingPersons.filter((p) => p.status === 'Active').length} Active
+                {missingPersons.filter((p) => p.status === 'Active').length} {dict.cases.activeOnly}
               </span>
               <span className="px-3 py-2 rounded-xl bg-emerald-600/20 text-emerald-300 font-mono font-bold text-xs border border-emerald-500/30">
-                {missingPersons.filter((p) => p.status === 'Located Safe').length} Located Safe
+                {missingPersons.filter((p) => p.status === 'Located Safe').length} {dict.cases.locatedSafe}
               </span>
             </div>
           </div>
@@ -199,7 +199,7 @@ export const CaseRegistry: React.FC<CaseRegistryProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search confidential files by name, case #, clothing, location..."
+              placeholder={dict.portal.searchPlaceholder}
               className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-10 py-2.5 text-xs sm:text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-rose-500"
             />
             {searchQuery && (
@@ -222,11 +222,11 @@ export const CaseRegistry: React.FC<CaseRegistryProps> = ({
               onChange={(e) => setFilterType(e.target.value)}
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs sm:text-sm text-slate-200 focus:outline-none focus:border-rose-500"
             >
-              <option value="ALL">All Alert Types ({missingPersons.length})</option>
-              <option value="AMBER">Amber Alert (Children)</option>
-              <option value="SILVER">Silver Alert (Seniors / Dementia)</option>
-              <option value="CRITICAL_MEDICAL">Critical Medical Dependent</option>
-              <option value="ENDANGERED">Endangered Missing Adults</option>
+              <option value="ALL">{dict.cases.allStatuses} ({missingPersons.length})</option>
+              <option value="AMBER">{dict.alertsHub.amberAlert}</option>
+              <option value="SILVER">{dict.alertsHub.silverAlert}</option>
+              <option value="CRITICAL_MEDICAL">{dict.alertsHub.medicalAlertTitle}</option>
+              <option value="ENDANGERED">{dict.alertsHub.endangeredAlert}</option>
             </select>
           </div>
         </div>
@@ -393,28 +393,20 @@ export const CaseRegistry: React.FC<CaseRegistryProps> = ({
                   </button>
                 )}
                 <button
-                  id={`btn-age-progression-${person.id}`}
-                  onClick={() => onAgeProgression?.(person)}
-                  title="Generate AI Age Progression for this person"
-                  className="p-2 rounded-xl bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 border border-slate-700 transition"
-                >
-                  <Sparkles className="w-4 h-4 text-rose-400" />
-                </button>
-                <button
                   id={`btn-scan-match-${person.id}`}
                   onClick={() => onScanForPerson(person.id)}
                   title="Run AI Photo Match against this person"
-                  className="p-2 rounded-xl bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 border border-slate-700 transition"
+                  className="p-2 rounded-xl bg-slate-800/90 hover:bg-cyan-950/60 text-slate-300 hover:text-cyan-300 border border-slate-700 hover:border-cyan-600/50 transition"
                 >
-                  <Eye className="w-4 h-4" />
+                  <Eye className="w-4 h-4 text-cyan-400" />
                 </button>
                 <button
                   id={`btn-flyer-case-${person.id}`}
                   onClick={() => onPrintFlyer(person)}
                   title="Print Official Missing Person Poster"
-                  className="p-2 rounded-xl bg-slate-800 hover:bg-amber-950/60 text-slate-300 hover:text-amber-300 border border-slate-700 transition"
+                  className="p-2 rounded-xl bg-slate-800/90 hover:bg-amber-950/60 text-slate-300 hover:text-amber-300 border border-slate-700 hover:border-amber-600/50 transition"
                 >
-                  <Printer className="w-4 h-4" />
+                  <Printer className="w-4 h-4 text-amber-400" />
                 </button>
                 {onDeletePerson && (
                   <button
@@ -424,9 +416,9 @@ export const CaseRegistry: React.FC<CaseRegistryProps> = ({
                       setDeletingPerson(person);
                     }}
                     title="Delete Case from Registry"
-                    className="p-2 rounded-xl bg-slate-800 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 border border-slate-700 transition"
+                    className="p-2 rounded-xl bg-slate-800/90 hover:bg-rose-950/60 text-slate-400 hover:text-rose-300 border border-slate-700 hover:border-rose-600/50 transition"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-4 h-4 text-rose-400" />
                   </button>
                 )}
               </div>
@@ -740,6 +732,82 @@ export const CaseRegistry: React.FC<CaseRegistryProps> = ({
               </div>
             </div>
 
+            {/* Associated Sighting Leads & Found Reports */}
+            <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-white flex items-center gap-1.5">
+                  <Camera className="w-3.5 h-3.5 text-amber-400" />
+                  <span>
+                    Associated Sighting Leads & Found Reports ({sightings.filter((s) => s.personId === selectedCase.id).length}):
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onScanForPerson(selectedCase.id);
+                    setSelectedCase(null);
+                  }}
+                  className="text-amber-400 hover:text-amber-300 font-semibold text-[11px] flex items-center gap-1 transition"
+                >
+                  <Eye className="w-3 h-3" />
+                  <span>Open Scanner / Search AI</span>
+                </button>
+              </div>
+
+              {sightings.filter((s) => s.personId === selectedCase.id).length === 0 ? (
+                <div className="p-3 rounded-lg bg-slate-900/60 border border-dashed border-slate-800 text-center text-slate-400 text-xs">
+                  <span>No public sighting leads or found reports logged yet for this dossier.</span>
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                  {sightings
+                    .filter((s) => s.personId === selectedCase.id)
+                    .map((lead) => (
+                      <div
+                        key={lead.id}
+                        className={`p-3 rounded-xl border flex items-start gap-3 ${
+                          lead.isFoundPersonReport
+                            ? 'bg-emerald-950/40 border-emerald-500/50'
+                            : 'bg-slate-900 border-slate-800'
+                        }`}
+                      >
+                        {lead.photoUrl ? (
+                          <img
+                            src={lead.photoUrl}
+                            alt="Lead Evidence"
+                            className="w-12 h-12 rounded-lg object-cover border border-slate-700 shrink-0"
+                          />
+                        ) : (
+                          <div className="w-12 h-12 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-500 shrink-0">
+                            <Camera className="w-5 h-5 text-slate-400" />
+                          </div>
+                        )}
+                        <div className="flex-1 space-y-1 min-w-0">
+                          <div className="flex items-center justify-between gap-1 flex-wrap">
+                            <div className="flex items-center gap-1.5">
+                              {lead.isFoundPersonReport && (
+                                <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950 text-[9px] font-bold">
+                                  FOUND REPORT
+                                </span>
+                              )}
+                              <span className="font-semibold text-white">{lead.locationName}</span>
+                            </div>
+                            <span className="text-[10px] font-mono text-slate-400">
+                              {new Date(lead.timestamp).toLocaleDateString()}
+                            </span>
+                          </div>
+                          <p className="text-slate-300 italic text-[11px] line-clamp-2">"{lead.notes}"</p>
+                          <div className="text-[10px] text-slate-400 flex items-center gap-2 flex-wrap">
+                            <span>Submitter: <strong className="text-slate-200">{lead.reportedBy}</strong></span>
+                            {lead.contactNumber && <span>{lead.contactNumber}</span>}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+
             {/* Modal Bottom Actions */}
             <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-800">
               <div className="flex items-center gap-2">
@@ -761,17 +829,6 @@ export const CaseRegistry: React.FC<CaseRegistryProps> = ({
               </div>
 
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => {
-                    onAgeProgression?.(selectedCase);
-                    setSelectedCase(null);
-                  }}
-                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-rose-400" />
-                  <span>Age Progression</span>
-                </button>
-
                 <button
                   onClick={() => {
                     onScanForPerson(selectedCase.id);
