@@ -1,0 +1,92 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (request.auth.token.email != null && request.auth.token.email == 'admin@findsafe.ai')
+      );
+    }
+
+    // Missing Person Cases
+    match /cases/{caseId} {
+      allow get: if isValidId(caseId);
+      allow list: if true;
+      allow create: if isValidId(caseId) && (
+        isAdmin() ||
+        (isSignedIn() && incoming().reportedByUserId == request.auth.uid)
+      );
+      allow update: if isValidId(caseId) && (
+        isAdmin() ||
+        (isSignedIn() && existing().reportedByUserId == request.auth.uid)
+      );
+      allow delete: if isValidId(caseId) && isAdmin();
+    }
+
+    // Sightings & Leads
+    match /sightings/{sightingId} {
+      allow get: if isValidId(sightingId);
+      allow list: if isSignedIn();
+      allow create: if isValidId(sightingId) && (
+        isSignedIn() ||
+        (incoming().notes is string && incoming().notes.size() <= 3000)
+      );
+      allow update, delete: if isValidId(sightingId) && (
+        isAdmin() ||
+        (isSignedIn() && existing().reportedBy == request.auth.uid)
+      );
+    }
+
+    // Broadcast Alerts
+    match /system_alerts/{alertId} {
+      allow get: if isValidId(alertId);
+      allow list: if true;
+      allow write: if isValidId(alertId) && isAdmin();
+    }
+
+    // User Profiles with PII Isolation
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(userId) && isOwner(userId) && (
+        !('role' in incoming()) || incoming().role == 'CITIZEN' || isAdmin()
+      );
+      allow update: if isValidId(userId) && isOwner(userId) && (
+        !incoming().diff(existing()).affectedKeys().hasAny(['role', 'status']) || isAdmin()
+      );
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    // Security Audit Logs
+    match /audit_logs/{logId} {
+      allow get, list: if isValidId(logId) && isAdmin();
+      allow create: if isValidId(logId) && isSignedIn();
+      allow update, delete: if false;
+    }
+  }
+}

@@ -1,6 +1,8 @@
 import { MissingPerson, FoundConfirmationRecord, ReporterNotificationDelivery, SubjectCondition, ReunionStatus, CurrentUser } from '../types';
 import { INITIAL_MISSING_PERSONS } from '../data/mockPersons';
 import { getAuthHeaders } from './authService';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 
 const STORAGE_KEY = 'findsafe_missing_cases_store_v3';
 
@@ -91,7 +93,18 @@ export async function syncCaseCreation(newCase: MissingPerson, userOverride?: Cu
     throw new Error(errorData.error || `Failed to create case (${res.status})`);
   }
   const data = await res.json();
-  return data.case || newCase;
+  const created = data.case || newCase;
+
+  // Mirror to Firestore collection if online
+  try {
+    if (created.id) {
+      await setDoc(doc(db, 'cases', created.id), created);
+    }
+  } catch (fsErr) {
+    console.warn('Firestore case mirror write non-blocking warning:', fsErr);
+  }
+
+  return created;
 }
 
 export async function syncCaseUpdate(updatedCase: MissingPerson, userOverride?: CurrentUser): Promise<MissingPerson> {
@@ -105,7 +118,18 @@ export async function syncCaseUpdate(updatedCase: MissingPerson, userOverride?: 
     throw new Error(errorData.error || `Failed to update case (${res.status})`);
   }
   const data = await res.json();
-  return data.case || updatedCase;
+  const saved = data.case || updatedCase;
+
+  // Mirror update to Firestore
+  try {
+    if (saved.id) {
+      await setDoc(doc(db, 'cases', saved.id), saved, { merge: true });
+    }
+  } catch (fsErr) {
+    console.warn('Firestore case mirror update non-blocking warning:', fsErr);
+  }
+
+  return saved;
 }
 
 export async function syncCaseDeletion(caseId: string, userOverride?: CurrentUser): Promise<void> {
@@ -121,6 +145,42 @@ export async function syncCaseDeletion(caseId: string, userOverride?: CurrentUse
   const local = getLocalCases();
   const filtered = local.filter((c) => c.id !== caseId && c.caseNumber !== caseId);
   saveLocalCases(filtered);
+
+  // Mirror delete to Firestore
+  try {
+    await deleteDoc(doc(db, 'cases', caseId));
+  } catch (fsErr) {
+    console.warn('Firestore case mirror delete non-blocking warning:', fsErr);
+  }
+}
+
+/**
+ * Real-time listener for cases collection in Firestore
+ */
+export function subscribeFirestoreCases(
+  onUpdate: (cases: MissingPerson[]) => void
+): () => void {
+  const pathForOnSnapshot = 'cases';
+  try {
+    return onSnapshot(
+      collection(db, pathForOnSnapshot),
+      (snapshot) => {
+        const items: MissingPerson[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push(docSnap.data() as MissingPerson);
+        });
+        if (items.length > 0) {
+          onUpdate(items);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, pathForOnSnapshot);
+      }
+    );
+  } catch (err) {
+    console.warn('Could not establish Firestore onSnapshot listener:', err);
+    return () => {};
+  }
 }
 
 export interface ConfirmFoundPayload {

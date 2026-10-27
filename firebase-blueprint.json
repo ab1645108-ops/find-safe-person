@@ -1,0 +1,120 @@
+{
+  "entities": {
+    "MissingPerson": {
+      "title": "MissingPerson",
+      "description": "Missing person case details and investigation records",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 150 },
+        "age": { "type": "number" },
+        "gender": { "type": "string", "enum": ["Female", "Male", "Non-Binary", "Other"] },
+        "alertType": { "type": "string", "enum": ["AMBER", "SILVER", "ENDANGERED", "CRITICAL_MEDICAL"] },
+        "missingSince": { "type": "string", "maxLength": 64 },
+        "photoUrl": { "type": "string", "maxLength": 1000000 },
+        "clothingLastSeen": { "type": "string", "maxLength": 500 },
+        "medicalConditions": { "type": "array" },
+        "riskLevel": { "type": "string", "enum": ["Extreme", "High", "Moderate"] },
+        "caseNumber": { "type": "string", "maxLength": 64 },
+        "investigatingAgency": { "type": "string", "maxLength": 150 },
+        "emergencyContact": { "type": "string", "maxLength": 150 },
+        "summary": { "type": "string", "maxLength": 3000 },
+        "status": { "type": "string", "enum": ["Active", "Located Safe", "Investigating", "Archived"] },
+        "reportedByUserId": { "type": "string", "maxLength": 128 },
+        "reportedByUserEmail": { "type": "string", "maxLength": 200 },
+        "isVerified": { "type": "boolean" },
+        "created_at": { "type": "string", "maxLength": 64 },
+        "updated_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "name", "age", "alertType", "status"]
+    },
+    "SightingLead": {
+      "title": "SightingLead",
+      "description": "Citizen and investigator submitted sighting leads",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "personId": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "string", "maxLength": 64 },
+        "locationName": { "type": "string", "maxLength": 250 },
+        "notes": { "type": "string", "maxLength": 3000 },
+        "photoUrl": { "type": "string", "maxLength": 1000000 },
+        "status": { "type": "string", "enum": ["Pending Review", "Verified Match", "Dismissed", "High Priority", "Manual Review Required", "Rejected"] },
+        "reportedBy": { "type": "string", "maxLength": 150 },
+        "contactNumber": { "type": "string", "maxLength": 50 },
+        "contactEmail": { "type": "string", "maxLength": 200 }
+      },
+      "required": ["id", "timestamp", "locationName", "notes", "status", "reportedBy"]
+    },
+    "SystemAlert": {
+      "title": "SystemAlert",
+      "description": "Urgent broadcast alerts for citizen dispatch and first responder notification",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string", "enum": ["AMBER_ALERT", "SILVER_ALERT", "HIGH_CONFIDENCE_SIGHTING", "CASE_UPDATE", "PERSON_FOUND_RESOLVED", "REPORTER_FOUND_NOTIFICATION", "CONFIRM_FOUND"] },
+        "severity": { "type": "string", "enum": ["CRITICAL", "HIGH", "INFO"] },
+        "title": { "type": "string", "maxLength": 200 },
+        "message": { "type": "string", "maxLength": 2000 },
+        "timestamp": { "type": "string", "maxLength": 64 },
+        "isRead": { "type": "boolean" }
+      },
+      "required": ["id", "type", "severity", "title", "message", "timestamp", "isRead"]
+    },
+    "User": {
+      "title": "User",
+      "description": "User profile records containing account role and identification",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 150 },
+        "email": { "type": "string", "maxLength": 200 },
+        "role": { "type": "string", "enum": ["CITIZEN", "PUBLIC_USER", "INVESTIGATOR", "ADMIN"] },
+        "status": { "type": "string", "enum": ["active", "inactive", "suspended", "PENDING_APPROVAL", "REJECTED"] },
+        "created_at": { "type": "string", "maxLength": 64 },
+        "updated_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "name", "email", "role", "status"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Security audit records for user actions and case modifications",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "string", "maxLength": 64 },
+        "actorId": { "type": "string", "maxLength": 128 },
+        "actorName": { "type": "string", "maxLength": 150 },
+        "actorRole": { "type": "string", "maxLength": 50 },
+        "action": { "type": "string", "maxLength": 100 },
+        "resourceType": { "type": "string", "maxLength": 100 },
+        "resourceId": { "type": "string", "maxLength": 128 },
+        "outcome": { "type": "string", "enum": ["SUCCESS", "FORBIDDEN", "FAILED"] },
+        "details": { "type": "string", "maxLength": 2000 }
+      },
+      "required": ["id", "timestamp", "actorId", "actorName", "action", "resourceType", "outcome"]
+    }
+  },
+  "firestore": {
+    "/cases/{caseId}": {
+      "schema": "MissingPerson",
+      "description": "Missing person case records accessible publicly for read, and managed by verified reporters or investigators/admins"
+    },
+    "/sightings/{sightingId}": {
+      "schema": "SightingLead",
+      "description": "Citizen reports and leads regarding missing person locations and sightings"
+    },
+    "/system_alerts/{alertId}": {
+      "schema": "SystemAlert",
+      "description": "Broadcast emergency alerts for active endangered searches"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile records containing account role and identification"
+    },
+    "/audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Security audit trail for tracking platform activities"
+    }
+  }
+}

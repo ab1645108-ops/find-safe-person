@@ -20,7 +20,7 @@ import { UserProfileModal } from './components/UserProfileModal';
 import { AdminUserManagement } from './components/AdminUserManagement';
 import { AccessDeniedBanner } from './components/AccessDeniedBanner';
 import { checkAuthMe, logoutUser, getStoredUser, adminFetchInvestigatorRequests } from './services/authService';
-import { fetchServerCases, syncCaseCreation, syncCaseUpdate, syncCaseDeletion, subscribeCaseEvents, getLocalCases, saveLocalCases } from './services/caseService';
+import { fetchServerCases, syncCaseCreation, syncCaseUpdate, syncCaseDeletion, subscribeCaseEvents, subscribeFirestoreCases, getLocalCases, saveLocalCases } from './services/caseService';
 import { fetchServerSightings, syncSightingCreation, syncSightingUpdate, syncSightingDeletion } from './services/sightingService';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
@@ -140,8 +140,27 @@ function AppContent() {
       }
     });
 
+    const unsubscribeFirestore = subscribeFirestoreCases((firestoreCases: MissingPerson[]) => {
+      if (firestoreCases && firestoreCases.length > 0) {
+        setMissingPersons((prev) => {
+          // Merge or update without reintroducing deleted cases
+          const updated = [...prev];
+          firestoreCases.forEach((fc: MissingPerson) => {
+            const idx = updated.findIndex((p) => p.id === fc.id);
+            if (idx >= 0) {
+              updated[idx] = fc;
+            } else {
+              updated.unshift(fc);
+            }
+          });
+          return updated;
+        });
+      }
+    });
+
     return () => {
       unsubscribe();
+      unsubscribeFirestore();
     };
   }, []);
 
