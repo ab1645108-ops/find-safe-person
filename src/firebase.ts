@@ -65,15 +65,17 @@ export async function testConnection(): Promise<boolean> {
     return true;
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('Firebase connection: client appears offline.');
+      console.warn('Please check your Firebase configuration.');
     }
     return false;
   }
 }
 
-// Trigger connection verification asynchronously without blocking app execution
+// Trigger connection verification safely once window is loaded
 if (typeof window !== 'undefined') {
-  testConnection().catch(() => {});
+  window.addEventListener('load', () => {
+    testConnection().catch(() => {});
+  }, { once: true });
 }
 
 export default app;

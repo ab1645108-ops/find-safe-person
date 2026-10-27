@@ -30,6 +30,11 @@ app.use("/api", setupAuthRouter());
 // Mount 6 Features API Router
 app.use("/api", setupFeaturesRouter(getGeminiClient));
 
+// Ensure firebase-applet-config.json is always served as application/json
+app.get("/firebase-applet-config.json", (_req, res) => {
+  res.sendFile(path.join(process.cwd(), "firebase-applet-config.json"));
+});
+
 // Health Check
 app.get("/api/health", (_req, res) => {
   res.json({

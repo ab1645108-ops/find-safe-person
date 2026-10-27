@@ -1,7 +1,7 @@
 import { MissingPerson, FoundConfirmationRecord, ReporterNotificationDelivery, SubjectCondition, ReunionStatus, CurrentUser } from '../types';
 import { INITIAL_MISSING_PERSONS } from '../data/mockPersons';
 import { getAuthHeaders } from './authService';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 
 const STORAGE_KEY = 'findsafe_missing_cases_store_v3';
@@ -97,7 +97,7 @@ export async function syncCaseCreation(newCase: MissingPerson, userOverride?: Cu
 
   // Mirror to Firestore collection if online
   try {
-    if (created.id) {
+    if (created.id && auth.currentUser) {
       await setDoc(doc(db, 'cases', created.id), created);
     }
   } catch (fsErr) {
@@ -122,7 +122,7 @@ export async function syncCaseUpdate(updatedCase: MissingPerson, userOverride?: 
 
   // Mirror update to Firestore
   try {
-    if (saved.id) {
+    if (saved.id && auth.currentUser) {
       await setDoc(doc(db, 'cases', saved.id), saved, { merge: true });
     }
   } catch (fsErr) {
@@ -148,7 +148,9 @@ export async function syncCaseDeletion(caseId: string, userOverride?: CurrentUse
 
   // Mirror delete to Firestore
   try {
-    await deleteDoc(doc(db, 'cases', caseId));
+    if (auth.currentUser) {
+      await deleteDoc(doc(db, 'cases', caseId));
+    }
   } catch (fsErr) {
     console.warn('Firestore case mirror delete non-blocking warning:', fsErr);
   }
@@ -160,6 +162,9 @@ export async function syncCaseDeletion(caseId: string, userOverride?: CurrentUse
 export function subscribeFirestoreCases(
   onUpdate: (cases: MissingPerson[]) => void
 ): () => void {
+  if (!auth.currentUser) {
+    return () => {};
+  }
   const pathForOnSnapshot = 'cases';
   try {
     return onSnapshot(
@@ -174,7 +179,11 @@ export function subscribeFirestoreCases(
         }
       },
       (error) => {
-        handleFirestoreError(error, OperationType.GET, pathForOnSnapshot);
+        try {
+          handleFirestoreError(error, OperationType.GET, pathForOnSnapshot);
+        } catch (e) {
+          console.warn('Firestore onSnapshot warning:', e);
+        }
       }
     );
   } catch (err) {

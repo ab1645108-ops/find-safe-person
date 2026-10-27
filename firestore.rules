@@ -33,6 +33,11 @@ service cloud.firestore {
       );
     }
 
+    // Test collection for boot connection verification
+    match /test/{testId} {
+      allow get: if true;
+    }
+
     // Missing Person Cases
     match /cases/{caseId} {
       allow get: if isValidId(caseId);

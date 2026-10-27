@@ -1,5 +1,17 @@
 import { UserAccount, UserRole, AccountStatus, AuditLogEntry, CurrentUser, InvestigatorRequest } from '../types';
 
+async function parseResponseJson<T = any>(res: Response, fallback: T): Promise<T> {
+  try {
+    const text = await res.text();
+    if (!text || !text.trim().startsWith("{") && !text.trim().startsWith("[")) {
+      return fallback;
+    }
+    return JSON.parse(text) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 const TOKEN_KEY = 'findsafe_auth_token';
 const USER_KEY = 'findsafe_auth_user';
 
@@ -92,7 +104,7 @@ export async function loginUser(email: string, password: string, expectedRole?: 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, expectedRole }),
     });
-    const data = await res.json();
+    const data = await parseResponseJson<any>(res, { error: `Server error (${res.status}): Please retry.` });
     if (!res.ok) {
       return { 
         success: false, 
